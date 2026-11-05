@@ -1,13 +1,15 @@
-# Render Blueprint — API (Docker, with Chromium for the verifier) + the web app (static).
-# New → Blueprint in the Render dashboard, point it at this repo, then fill the secrets it asks for.
+# Render Blueprint — one Docker service: the API, the verifier's Chromium and the web app on one URL.
+# Deploy your own copy: New → Blueprint in the Render dashboard, point it at this repo, fill the secrets.
+# (Or put the server's .env in a secret file named `.env` instead of filling each secret.)
 services:
   - type: web
-    name: verdikt-api
+    name: verdikt
     runtime: docker
-    rootDir: server
+    plan: starter
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     envVars:
+      # read at runtime — secrets
       - key: PAYPAL_ENV
         value: sandbox
       - key: PAYPAL_CLIENT_ID
@@ -22,25 +24,14 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
-      - key: CORS_ORIGIN
-        sync: false
-
-  - type: web
-    name: verdikt-web
-    runtime: static
-    rootDir: web
-    buildCommand: npm ci && npm run build
-    staticPublishPath: dist
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-    envVars:
-      - key: VITE_API_URL
-        sync: false
+      - key: PLATFORM_FEE_PERCENT
+        value: "2"
+      # read at build time — public, they ship to the browser
       - key: VITE_SUPABASE_URL
         sync: false
       - key: VITE_SUPABASE_ANON_KEY
         sync: false
       - key: VITE_PAYPAL_CLIENT_ID
         sync: false
+      - key: VITE_PLATFORM_FEE_PERCENT
+        value: "2"

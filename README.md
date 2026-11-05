@@ -60,7 +60,7 @@ With no Supabase keys the app runs in **demo mode** (or set `VITE_DEMO=true`): e
    npm run paypal:smoke -- --void  # … → void (refund)
    ```
 
-**Deploy:** `render.yaml` is a Render Blueprint — the API runs in Docker with Chromium for the verifier, the web app as a static site.
+**Deploy (Render):** one Docker service runs the API, the verifier's Chromium and the built web app on a single URL (the API serves the app, so there is no CORS to configure). [`render.yaml`](render.yaml) is a Blueprint — New → Blueprint, point it at this repo, fill the secrets — or with the [Render CLI](https://render.com/docs/cli): `render services create --type web_service --runtime docker --repo <this repo> …`, with the server's `.env` uploaded as a secret file named `.env` (the container reads `/etc/secrets/.env`). The `VITE_` variables are read at build time and are public. Then point the PayPal webhook at `https://<your-service>.onrender.com/api/paypal/webhook` and add the URL to Supabase's redirect URLs. Anyone can try the deployed app without an account: *Try it now* (or any link with `?demo`) switches that browser to the demo.
 
 ## How PayPal and AI are used
 

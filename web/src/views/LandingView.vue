@@ -8,6 +8,7 @@ import VPill from '@/components/ui/VPill.vue'
 import EscrowCard from '@/components/EscrowCard.vue'
 import ScoreRing from '@/components/ScoreRing.vue'
 import { useAuthStore } from '@/stores/auth'
+import { isDemo, enterDemo } from '@/services'
 
 const auth = useAuthStore()
 const appLink = computed(() => (auth.user ? '/contracts' : '/login'))
@@ -49,7 +50,8 @@ const steps = [
         <p class="hero__sub">Freelancers get stiffed. Clients pay for work that isn't done. Verdikt turns a contract into checks both sides sign, holds the money with PayPal, and lets an agent test the delivery — releasing payment only when it passes, with the evidence for every decision.</p>
         <div class="hero__cta">
           <VButton :to="auth.user ? '/contracts/new' : '/login'" size="lg" :icon-right="ArrowRight">Start a contract</VButton>
-          <a href="#how" class="vk-btn vk-btn--secondary vk-btn--lg">How it works</a>
+          <VButton v-if="!isDemo && !auth.user" variant="secondary" size="lg" @click="enterDemo">Try it now — no sign-up</VButton>
+          <a v-else href="#how" class="vk-btn vk-btn--secondary vk-btn--lg">How it works</a>
         </div>
       </div>
 

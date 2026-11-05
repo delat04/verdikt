@@ -19,7 +19,7 @@ import { vGlide } from '@/directives/glide'
 import { useAuthStore } from '@/stores/auth'
 import { useTheme } from '@/composables/useTheme'
 import { useLive } from '@/composables/useLive'
-import { api, isDemo } from '@/services'
+import { api, isDemo, canLeaveDemo, leaveDemo } from '@/services'
 import { toast } from '@/composables/useToast'
 import { nextStep, roleOf, counterparty } from '@/domain/milestone'
 
@@ -179,6 +179,7 @@ onBeforeUnmount(() => {
                   <p class="demo__title">You're in demo mode</p>
                   <p class="demo__text">Everything runs in this browser. PayPal (sandbox) and the agent are simulated, so the whole flow works without keys. Switch between Maya and Sam to play both sides.</p>
                   <VButton size="sm" variant="secondary" :icon="RotateCcw" @click="resetDemo">Reset the demo</VButton>
+                  <VButton v-if="canLeaveDemo" size="sm" variant="ghost" @click="leaveDemo">Use a real account</VButton>
                 </div>
               </Transition>
             </div>

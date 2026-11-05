@@ -17,7 +17,7 @@ const MAX_FILE = 12000
 function launchOptions() {
   // CHROME_PATH (Docker: /usr/bin/chromium) wins; locally fall back to the installed Chrome
   return process.env.CHROME_PATH
-    ? { executablePath: process.env.CHROME_PATH, args: ['--no-sandbox'] }
+    ? { executablePath: process.env.CHROME_PATH, args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'] }
     : { channel: 'chrome' }
 }
 

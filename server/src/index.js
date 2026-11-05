@@ -1,5 +1,7 @@
+import { existsSync } from 'node:fs'
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
+import fastifyStatic from '@fastify/static'
 import { config } from './config.js'
 import { PayPalError } from './lib/paypal.js'
 import contractRoutes, { inviteRoutes } from './routes/contracts.js'
@@ -46,6 +48,22 @@ await app.register(deliveryRoutes, { prefix: '/api' })
 await app.register(webhookRoutes, { prefix: '/api' })
 await app.register(disputeRoutes, { prefix: '/api' })
 await app.register(roomRoutes, { prefix: '/api' })
+
+// Deployed, the built web app ships in the same image (WEB_DIST): serve it, with long caching for the
+// hashed assets, and hand every other GET to the app's router so deep links like /contracts/:id work
+const webDist = process.env.WEB_DIST
+if (webDist && existsSync(webDist)) {
+  await app.register(fastifyStatic, {
+    root: webDist,
+    wildcard: false,
+    cacheControl: false,   // our header below, not the plugin's max-age=0
+    setHeaders: (res, path) => res.setHeader('Cache-Control', /[\\/]assets[\\/]/.test(path) ? 'public, max-age=31536000, immutable' : 'no-cache'),
+  })
+  app.setNotFoundHandler((request, reply) => {
+    if (request.method !== 'GET' || request.url.startsWith('/api/')) return reply.code(404).send({ error: 'Not found' })
+    return reply.header('Cache-Control', 'no-cache').sendFile('index.html')
+  })
+}
 
 await app.listen({ port: config.port, host: '0.0.0.0' })
 

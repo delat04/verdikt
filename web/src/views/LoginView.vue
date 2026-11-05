@@ -5,7 +5,7 @@ import { Mail, ArrowRight, Briefcase, Code2 } from 'lucide-vue-next'
 import AuthLayout from '@/layouts/AuthLayout.vue'
 import VButton from '@/components/ui/VButton.vue'
 import VField from '@/components/ui/VField.vue'
-import { api, isDemo } from '@/services'
+import { api, isDemo, canLeaveDemo, enterDemo, leaveDemo } from '@/services'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
@@ -58,7 +58,11 @@ async function demoAs(key) {
           <ArrowRight v-else :size="16" class="go" />
         </button>
       </div>
-      <p class="note vk-faint">Connect Supabase and PayPal (see the README) to switch to real accounts and real sandbox escrow.</p>
+      <div v-if="canLeaveDemo" class="other">
+        <p class="vk-faint">Want a real account and real PayPal sandbox escrow?</p>
+        <VButton variant="secondary" size="sm" @click="leaveDemo">Sign in for real</VButton>
+      </div>
+      <p v-else class="note vk-faint">Connect Supabase and PayPal (see the README) to switch to real accounts and real sandbox escrow.</p>
     </template>
 
     <!-- live -->
@@ -72,6 +76,10 @@ async function demoAs(key) {
         </VField>
         <VButton type="submit" size="lg" block :loading="busy === 'email'" :icon-right="ArrowRight">Email me a link</VButton>
       </form>
+      <div class="other">
+        <p class="vk-faint">Just looking? Play both sides in a demo, no account needed.</p>
+        <VButton variant="secondary" size="sm" @click="enterDemo">Try the demo</VButton>
+      </div>
     </template>
 
     <div v-else class="sent">
@@ -88,6 +96,8 @@ async function demoAs(key) {
 .sub { margin: 8px 0 0; font: var(--vk-type-body); color: var(--vk-muted); }
 .form { display: flex; flex-direction: column; gap: 16px; margin-top: 24px; }
 .people { margin-top: 24px; }
+.other { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--vk-line-subtle); font: var(--vk-type-small); }
+.other p { margin: 0; }
 .people .vk-choice { align-items: center; }
 .go { margin-left: auto; color: var(--vk-faint); }
 .vk-choice:hover .go { color: var(--vk-ink); }

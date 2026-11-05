@@ -19,7 +19,7 @@ export const PERSONAS = {
 function blank() {
   const profiles = {}
   for (const p of Object.values(PERSONAS)) {
-    profiles[p.id] = { id: p.id, name: p.name, email: p.email, intent: p.intent, paypalEmail: '', onboarded: false }
+    profiles[p.id] = { id: p.id, name: p.name, email: p.email, intent: p.intent, paypalEmail: p.intent === 'freelancer' ? p.email : '', onboarded: true }
   }
   return { sessionUserId: null, profiles, contracts: [] }
 }

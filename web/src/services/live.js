@@ -6,7 +6,8 @@
 
 import { supabase } from '@/lib/supabase'
 
-const BASE = import.meta.env.VITE_API_URL || 'http://localhost:4100'
+// deployed, the API serves this app from the same origin; in development it runs on :4100
+const BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:4100')
 
 async function call(path, { method = 'POST', body } = {}) {
   const { data } = await supabase.auth.getSession()
