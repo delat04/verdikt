@@ -6,7 +6,8 @@
 -->
 <script setup>
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
-import { Send, Check, UserPlus, ArrowLeftRight, CircleDashed, CornerDownLeft } from 'lucide-vue-next'
+import { Send, Check, UserPlus, ArrowLeftRight, CircleDashed, CornerDownLeft, Bot, Lock, Pause } from 'lucide-vue-next'
+import VField from '@/components/ui/VField.vue'
 import VButton from '@/components/ui/VButton.vue'
 import VAvatar from '@/components/ui/VAvatar.vue'
 import VCopy from '@/components/ui/VCopy.vue'
@@ -18,7 +19,7 @@ import { useSplitScroll } from '@/composables/useSplitScroll'
 import { useAuthStore } from '@/stores/auth'
 import { api, isDemo } from '@/services'
 import { toast } from '@/composables/useToast'
-import { money, firstName, shortDate, timeAgo } from '@/domain/format'
+import { money, firstName, shortDate, timeAgo, toCents } from '@/domain/format'
 
 const props = defineProps({
   contract: { type: Object, required: true },
@@ -176,6 +177,61 @@ watch(terms, (now, before) => {
 })
 onBeforeUnmount(() => clearTimeout(flashTimer))
 
+// ---- your negotiating agent: a private mandate, only you see it
+const mandate = computed(() => room.value?.mandate || null)
+const agentOn = computed(() => !!mandate.value?.active)
+const isClient = computed(() => props.role === 'client')
+const mandateOpen = ref(false)
+const mForm = ref({ limit: '', days: '', must: '', notes: '', auto: true })
+function openMandate() {
+  const m = mandate.value
+  mForm.value = {
+    limit: m?.limitCents ? String(m.limitCents / 100) : '',
+    days: m?.deadlineDays ? String(m.deadlineDays) : '',
+    must: (m?.mustHaves || []).join(', '),
+    notes: m?.notes || '',
+    auto: m ? m.autoAccept : true,
+  }
+  mandateOpen.value = true
+}
+const mandateSummary = computed(() => {
+  const m = mandate.value
+  if (!m) return ''
+  return [
+    m.limitCents && `${isClient.value ? 'up to' : 'at least'} ${money(m.limitCents, cur.value, { whole: true })}`,
+    m.deadlineDays && `${isClient.value ? 'live within' : 'needs'} ${m.deadlineDays} days`,
+    m.mustHaves?.length && `${m.mustHaves.length} must-have${m.mustHaves.length > 1 ? 's' : ''}`,
+  ].filter(Boolean).join(' · ')
+})
+const savingMandate = ref(false)
+async function saveMandate() {
+  savingMandate.value = true
+  try {
+    await api.setMandate(props.contract.id, {
+      limitCents: mForm.value.limit ? toCents(mForm.value.limit) : null,
+      deadlineDays: mForm.value.days ? Number(mForm.value.days) : null,
+      mustHaves: mForm.value.must.split(/[,\n]/).map((x) => x.trim()).filter(Boolean),
+      notes: mForm.value.notes.trim(),
+      autoAccept: mForm.value.auto,
+    })
+    mandateOpen.value = false
+    toast('Your agent is negotiating — your limits stay private')
+  } catch (e) {
+    toast(e.message, { tone: 'danger' })
+  } finally {
+    savingMandate.value = false
+  }
+}
+async function stopAgent() {
+  try {
+    await api.stopMandate(props.contract.id)
+    toast("You're back in the room")
+  } catch (e) {
+    toast(e.message, { tone: 'danger' })
+  }
+}
+const whoSaid = (m) => (m.author === props.role ? (m.viaAgent ? 'Your agent' : 'You') : `${nameOf(m.author)}${m.viaAgent ? "'s agent" : ''}`)
+
 // ---- invite + demo switch
 const inviteOpen = ref(false)
 const inviteLink = computed(() => `${window.location.origin}/join/${props.contract.inviteCode}`)
@@ -224,7 +280,8 @@ async function switchToOther() {
               <VAvatar v-else-if="m.author !== role" :name="people[m.author]" size="sm" class="msg__avatar" />
               <div class="msg__body">
                 <p class="msg__who">
-                  <span>{{ m.author === role ? 'You' : nameOf(m.author) }}<template v-if="m.author === 'agent'"> · mediator</template></span>
+                  <span>{{ m.author === 'agent' ? 'Verdikt · mediator' : whoSaid(m) }}</span>
+                  <span v-if="m.viaAgent && m.author !== role" class="msg__agent"><Bot :size="11" aria-hidden="true" /> agent</span>
                   <span class="vk-faint">{{ timeAgo(m.createdAt) }}</span>
                 </p>
                 <p v-if="m.body" class="msg__text">{{ m.body }}</p>
@@ -337,6 +394,28 @@ async function switchToOther() {
 
         <!-- acceptance stays at the bottom of the column -->
         <div class="agree-dock">
+        <section v-if="other" class="agent" :class="{ 'is-on': agentOn }" aria-label="Your negotiating agent">
+          <div class="agent__head">
+            <span class="agent__icon" aria-hidden="true"><Bot :size="16" /></span>
+            <div class="agent__text">
+              <p class="agent__title">
+                <template v-if="agentOn">Your agent is negotiating</template>
+                <template v-else-if="mandate?.status === 'handed_back'">Your agent handed the room back</template>
+                <template v-else>Let an agent negotiate for you</template>
+              </p>
+              <p class="agent__sub">
+                <template v-if="agentOn">{{ mandateSummary }} · turn {{ mandate.turns }} of 6</template>
+                <template v-else-if="mandate?.status === 'handed_back'">{{ mandate.statusNote }}</template>
+                <template v-else>Set your limits once. It bargains within them and accepts only terms that fit.</template>
+              </p>
+            </div>
+          </div>
+          <p v-if="agentOn && mandate.statusNote" class="agent__note"><Lock :size="11" aria-hidden="true" /> {{ mandate.statusNote }}</p>
+          <div class="agent__actions">
+            <VButton v-if="agentOn" size="sm" variant="secondary" :icon="Pause" @click="stopAgent">Take over</VButton>
+            <VButton size="sm" :variant="agentOn ? 'ghost' : 'secondary'" :icon="agentOn ? null : Bot" @click="openMandate">{{ agentOn ? 'Adjust limits' : mandate ? 'Hand it back to the agent' : 'Set up my agent' }}</VButton>
+          </div>
+        </section>
         <section class="agree" aria-label="Accept the terms">
           <ul class="agree__rows">
             <li v-for="r in acceptRows" :key="r.role" :class="{ 'is-ok': r.ok }">
@@ -365,6 +444,34 @@ async function switchToOther() {
         </div>
       </aside>
     </div>
+
+    <VModal :open="mandateOpen" title="Your negotiating agent" :sub="`It speaks for you in this room. ${firstName(other?.name || 'The other side')} sees that an agent is negotiating, never your limits.`" @close="mandateOpen = false">
+      <form class="mandate" @submit.prevent="saveMandate">
+        <div class="mandate__row">
+          <VField :label="isClient ? 'The most you\'ll pay' : 'The least you\'ll take'" for="mlimit" optional>
+            <div class="vk-affix"><span class="vk-affix__pre">$</span><input id="mlimit" v-model="mForm.limit" class="vk-input vk-num" inputmode="decimal" placeholder="1,400" /><span class="vk-affix__post">{{ cur }}</span></div>
+          </VField>
+          <VField :label="isClient ? 'Live within' : 'Time you need'" for="mdays" optional>
+            <div class="vk-affix"><input id="mdays" v-model="mForm.days" class="vk-input vk-num" inputmode="numeric" placeholder="30" /><span class="vk-affix__post">days</span></div>
+          </VField>
+        </div>
+        <VField :label="isClient ? 'Must be in scope' : 'Must stay out of scope'" for="mmust" optional hint="Separate with commas">
+          <input id="mmust" v-model="mForm.must" class="vk-input" :placeholder="isClient ? 'menu page, pickup orders' : 'card payments'" />
+        </VField>
+        <VField label="Anything else it should know" for="mnotes" optional>
+          <input id="mnotes" v-model="mForm.notes" class="vk-input" :placeholder="isClient ? 'Prefer two payments' : 'Payments can be a separate job'" />
+        </VField>
+        <label class="mandate__auto">
+          <input v-model="mForm.auto" type="checkbox" />
+          <span>Accept on my behalf when every limit is met. Otherwise it hands the room back to me to confirm.</span>
+        </label>
+        <p class="mandate__safe"><Lock :size="13" aria-hidden="true" /> The limits are checked in code, not just asked of the AI: it can never accept a price or date outside them. It speaks at most 6 times, then hands back to you. Money still needs you — only the client approves the PayPal hold.</p>
+      </form>
+      <template #foot>
+        <VButton variant="secondary" @click="mandateOpen = false">Cancel</VButton>
+        <VButton :icon="Bot" :loading="savingMandate" @click="saveMandate">{{ agentOn ? 'Update limits' : 'Start negotiating' }}</VButton>
+      </template>
+    </VModal>
 
     <VModal :open="inviteOpen" title="Invite to the room" :sub="`They join as the ${otherRole} and shape the terms with you.`" @close="inviteOpen = false">
       <div class="invite">
@@ -498,6 +605,25 @@ async function switchToOther() {
 .agree__state { display: inline-flex; align-items: center; gap: 4px; font: var(--vk-type-small); color: var(--vk-muted); }
 .is-ok .agree__state { color: var(--vk-accent-text); }
 .agree__note { margin: 0; font: var(--vk-type-small); color: var(--vk-muted); }
+
+.msg__agent { display: inline-flex; align-items: center; gap: 3px; padding: 0 7px; border: 1px solid var(--vk-accent-line); border-radius: var(--vk-r-full); color: var(--vk-accent-text); font-size: 11px; line-height: 16px; }
+
+.agent { margin-bottom: 10px; padding: 14px 16px; border: 1px solid var(--vk-line); border-radius: var(--vk-r-md); background: var(--vk-surface); display: flex; flex-direction: column; gap: 10px; }
+.agent.is-on { border-color: var(--vk-accent-line); background: var(--vk-accent-soft); }
+.agent__head { display: flex; gap: 10px; align-items: flex-start; }
+.agent__icon { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--vk-line); background: var(--vk-surface); color: var(--vk-accent-text); }
+.agent__text { min-width: 0; }
+.agent__title { margin: 0; font: 400 14px/20px var(--vk-font); color: var(--vk-ink); }
+.agent__sub { margin: 2px 0 0; font: var(--vk-type-small); color: var(--vk-muted); }
+.agent__note { display: flex; gap: 6px; align-items: baseline; margin: 0; font: var(--vk-type-small); color: var(--vk-ink-2); }
+.agent__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.mandate { display: flex; flex-direction: column; gap: 14px; }
+.mandate__row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.mandate__auto { display: flex; gap: 10px; align-items: flex-start; font: var(--vk-type-dense); color: var(--vk-ink-2); cursor: pointer; }
+.mandate__auto input { margin-top: 3px; accent-color: var(--vk-accent); }
+.mandate__safe { display: flex; gap: 8px; align-items: baseline; margin: 0; padding: 10px 12px; border: 1px solid var(--vk-line-subtle); border-radius: var(--vk-r-sm); background: var(--vk-surface-2); font: var(--vk-type-small); color: var(--vk-ink-2); }
+@media (max-width: 560px) { .mandate__row { grid-template-columns: 1fr; } }
 
 .invite__code { margin: 6px 0 0; font-size: 26px; letter-spacing: .14em; }
 .invite__note { margin: 16px 0 0; font: var(--vk-type-small); }

@@ -2,50 +2,65 @@
     The contract room — client and freelancer shape the terms together; the mediator keeps the
     terms sheet current. open → talk → both accept the same version → lock: milestones are created
     from the sheet and the checks are drafted (then the usual sign → fund → deliver flow).
+    Either side can hand the room to a negotiating agent with a private mandate.
     ============================================================================ */
 
 import { db, audit } from '../lib/supabase.js'
 import { requireUser } from '../lib/auth.js'
 import { mediateSoon, emptyTerms } from '../agent/mediator.js'
-import { draftInBackground } from './contracts.js'
-
-const say = (contractId, author, body, extra = {}) => db().from('room_messages').insert({ contract_id: contractId, author, body, ...extra })
+import { negotiateSoon } from '../agent/negotiator.js'
+import { say, loadRoom, roleOf, nameOf, acceptVersion, RoomError } from '../lib/room.js'
 
 async function roomFor(request, reply) {
-  const { data: c } = await db().from('contracts')
-    .select('*, client:profiles!contracts_client_id_fkey(display_name), freelancer:profiles!contracts_freelancer_id_fkey(display_name)')
-    .eq('id', request.params.id).maybeSingle()
+  const c = await loadRoom(request.params.id)
   if (!c) { reply.code(404).send({ error: 'Contract not found' }); return null }
-  const me = request.user.id
-  const role = c.client_id === me ? 'client' : c.freelancer_id === me ? 'freelancer' : null
+  const role = roleOf(c, request.user.id)
   if (!role) { reply.code(403).send({ error: 'You are not in this room' }); return null }
   if (c.status !== 'scoping') { reply.code(409).send({ error: 'The terms are already locked' }); return null }
-  return { c, role, name: (role === 'client' ? c.client : c.freelancer)?.display_name || role }
+  return { c, role, name: nameOf(c, role) }
+}
+
+/** Open a room: a title and a sentence or two; the mediator drafts from there. Also used over MCP. */
+export async function openRoom(userId, { title = '', idea = '', role = 'client', counterpartEmail = '', currency = 'USD' }, { viaAgent = false } = {}) {
+  if (title.trim().length < 4) throw new RoomError(400, 'Give the project a title')
+  if (idea.trim().length < 15) throw new RoomError(400, 'Say in a sentence or two what this is about')
+  if (!['client', 'freelancer'].includes(role)) throw new RoomError(400, 'Invalid role')
+  const { data: c, error } = await db().from('contracts').insert({
+    title: title.trim(), brief: idea.trim(), currency, created_by: userId, status: 'scoping', terms: emptyTerms(),
+    invite_email: counterpartEmail.trim() || null,
+    client_id: role === 'client' ? userId : null,
+    freelancer_id: role === 'freelancer' ? userId : null,
+  }).select().single()
+  if (error) throw error
+  const { data: p } = await db().from('profiles').select('display_name').eq('id', userId).single()
+  await say(c.id, role, idea.trim(), { via_agent: viaAgent })
+  await audit({ contractId: c.id, actor: role, event: 'room.opened', payload: { name: p?.display_name, viaAgent } })
+  mediateSoon(c.id)
+  return { id: c.id, inviteCode: c.invite_code }
+}
+
+/** Hand the room to an agent with a private mandate (or update it). */
+export async function setMandate(c, role, userId, { limitCents, deadlineDays, mustHaves = [], notes = '', autoAccept = true }) {
+  const limit = limitCents == null || limitCents === '' ? null : Number(limitCents)
+  const days = deadlineDays == null || deadlineDays === '' ? null : Number(deadlineDays)
+  if (limit != null && (!Number.isInteger(limit) || limit < 100)) throw new RoomError(400, 'The price limit needs to be at least $1.00')
+  if (days != null && (!Number.isInteger(days) || days < 1 || days > 365)) throw new RoomError(400, 'The time limit is a number of days, 1 to 365')
+  if (limit == null && days == null && !mustHaves.length) throw new RoomError(400, 'Give your agent at least one limit or must-have')
+  const { data: existing } = await db().from('room_mandates').select('active').eq('contract_id', c.id).eq('role', role).maybeSingle()
+  await db().from('room_mandates').upsert({
+    contract_id: c.id, role, user_id: userId, limit_cents: limit, deadline_days: days,
+    must_haves: mustHaves.map((s) => String(s).trim()).filter(Boolean).slice(0, 8), notes: String(notes).slice(0, 500),
+    auto_accept: !!autoAccept, active: true, status: 'negotiating', status_note: '', turns: 0, updated_at: new Date().toISOString(),
+  })
+  if (!existing?.active) await say(c.id, 'system', `${nameOf(c, role)} handed the negotiation to an agent. It speaks for them within limits only they can see.`)
+  await audit({ contractId: c.id, actor: role, event: 'room.agent_on', payload: {} })
+  negotiateSoon(c.id, 600)
 }
 
 export default async function roomRoutes(app) {
   app.addHook('preHandler', requireUser)
 
-  // ---- open a room: a title and a sentence or two; the mediator drafts from there
-  app.post('/rooms', async (request, reply) => {
-    const { title = '', idea = '', role = 'client', counterpartEmail = '', currency = 'USD' } = request.body || {}
-    if (title.trim().length < 4) return reply.code(400).send({ error: 'Give the project a title' })
-    if (idea.trim().length < 15) return reply.code(400).send({ error: 'Say in a sentence or two what this is about' })
-    if (!['client', 'freelancer'].includes(role)) return reply.code(400).send({ error: 'Invalid role' })
-    const me = request.user.id
-    const { data: c, error } = await db().from('contracts').insert({
-      title: title.trim(), brief: idea.trim(), currency, created_by: me, status: 'scoping', terms: emptyTerms(),
-      invite_email: counterpartEmail.trim() || null,
-      client_id: role === 'client' ? me : null,
-      freelancer_id: role === 'freelancer' ? me : null,
-    }).select().single()
-    if (error) throw error
-    const { data: p } = await db().from('profiles').select('display_name').eq('id', me).single()
-    await say(c.id, role, idea.trim())
-    await audit({ contractId: c.id, actor: role, event: 'room.opened', payload: { name: p?.display_name } })
-    mediateSoon(c.id)
-    return { id: c.id, inviteCode: c.invite_code }
-  })
+  app.post('/rooms', async (request) => openRoom(request.user.id, request.body || {}, { viaAgent: !!request.user.viaToken }))
 
   // ---- talk
   app.post('/contracts/:id/room/messages', async (request, reply) => {
@@ -53,7 +68,7 @@ export default async function roomRoutes(app) {
     if (!room) return
     const body = String(request.body?.body || '').trim()
     if (!body) return reply.code(400).send({ error: 'Write something first' })
-    await say(room.c.id, room.role, body.slice(0, 2000))
+    await say(room.c.id, room.role, body.slice(0, 2000), { via_agent: !!request.user.viaToken })
     mediateSoon(room.c.id)
     return { ok: true }
   })
@@ -70,39 +85,23 @@ export default async function roomRoutes(app) {
   app.post('/contracts/:id/room/accept', async (request, reply) => {
     const room = await roomFor(request, reply)
     if (!room) return
-    const { c, role, name } = room
-    const terms = c.terms || emptyTerms()
-    const version = Number(request.body?.version)
-    if (version !== terms.version) return reply.code(409).send({ error: 'The terms changed while you were reading — check the latest version' })
-    if (!c.client_id || !c.freelancer_id) return reply.code(409).send({ error: 'Both of you need to be in the room first' })
-    const ms = terms.milestones || []
-    if (!ms.length || ms.length > 6 || ms.some((m) => !m.title?.trim() || !Number.isInteger(m.amount_cents) || m.amount_cents < 100)) {
-      return reply.code(409).send({ error: 'The terms need 1–6 milestones, each with a title and at least $1.00' })
-    }
-    const field = role === 'client' ? 'terms_client_v' : 'terms_freelancer_v'
-    await db().from('contracts').update({ [field]: version }).eq('id', c.id)
-    await say(c.id, 'system', `${name} accepted version ${version}.`, { version })
-    await audit({ contractId: c.id, actor: role, event: 'room.accepted', payload: { version } })
+    const res = await acceptVersion(room.c, room.role, Number(request.body?.version), { viaAgent: !!request.user.viaToken })
+    return { ok: true, ...res }
+  })
 
-    const otherAccepted = (role === 'client' ? c.terms_freelancer_v : c.terms_client_v) === version
-    if (!otherAccepted) return { ok: true, locked: false }
-
-    // ---- lock: the sheet becomes milestones and a brief; the checks are drafted from them
-    const brief = [
-      terms.summary,
-      terms.scope?.length ? `In scope: ${terms.scope.join('; ')}.` : '',
-      terms.out_of_scope?.length ? `Out of scope: ${terms.out_of_scope.join('; ')}.` : '',
-    ].filter(Boolean).join(' ')
-    const { data: rows, error } = await db().from('milestones').insert(ms.map((m, i) => ({
-      contract_id: c.id, position: i + 1, title: m.title.trim(),
-      description: (m.done_means || []).map((d) => d.replace(/\.?$/, '.')).join(' '), amount_cents: m.amount_cents,
-      due_at: m.due_days > 0 ? new Date(Date.now() + m.due_days * 864e5).toISOString() : null, status: 'draft',
-    }))).select()
-    if (error) throw error
-    await db().from('contracts').update({ status: 'drafting', brief: brief || c.brief }).eq('id', c.id)
-    await say(c.id, 'system', `Both of you accepted version ${version}. The terms are locked — the agent is turning each milestone into checks you'll sign.`, { version })
-    await audit({ contractId: c.id, actor: 'system', event: 'room.locked', payload: { version, milestones: rows.length } })
-    draftInBackground({ ...c, brief: brief || c.brief }, rows.sort((a, b) => a.position - b.position))
-    return { ok: true, locked: true }
+  // ---- negotiating agent: hand over with a private mandate, or take the room back
+  app.post('/contracts/:id/room/mandate', async (request, reply) => {
+    const room = await roomFor(request, reply)
+    if (!room) return
+    await setMandate(room.c, room.role, request.user.id, request.body || {})
+    return { ok: true }
+  })
+  app.post('/contracts/:id/room/mandate/stop', async (request, reply) => {
+    const room = await roomFor(request, reply)
+    if (!room) return
+    await db().from('room_mandates').update({ active: false, status: 'paused', updated_at: new Date().toISOString() }).eq('contract_id', room.c.id).eq('role', room.role)
+    await say(room.c.id, 'system', `${room.name} is back in the room in person.`)
+    await audit({ contractId: room.c.id, actor: room.role, event: 'room.agent_off', payload: {} })
+    return { ok: true }
   })
 }

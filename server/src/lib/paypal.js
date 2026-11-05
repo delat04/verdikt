@@ -64,7 +64,7 @@ export function centsToValue(cents) {
 }
 
 // ---- Orders ----
-export function createAuthorizeOrder({ amountCents, currency = 'USD', referenceId, description, requestId }) {
+export function createAuthorizeOrder({ amountCents, currency = 'USD', referenceId, description, requestId, returnUrl, cancelUrl }) {
   return call('POST', '/v2/checkout/orders', {
     intent: 'AUTHORIZE',
     purchase_units: [{
@@ -78,6 +78,7 @@ export function createAuthorizeOrder({ amountCents, currency = 'USD', referenceI
           brand_name: 'Verdikt Escrow',
           user_action: 'CONTINUE',
           shipping_preference: 'NO_SHIPPING',
+          ...(returnUrl && { return_url: returnUrl, cancel_url: cancelUrl || returnUrl }),
         },
       },
     },

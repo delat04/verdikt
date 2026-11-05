@@ -157,7 +157,7 @@ export function mediateDemo(room, { names, joined }) {
         const a = amts[0]
         if (s.pending?.kind === 'price' && s.pending.amount === a && s.pending.by !== author) {
           changes.push(`Total: ${usd(s.total)} → ${usd(a)}`); s.total = a; s.priceBy = author; s.pending = null
-        } else if (!s.total || s.priceBy === author) {
+        } else if (!s.total || (s.priceBy === author && !joined[other(author)])) {
           if (a !== s.total) { changes.push(s.total ? `Total: ${usd(s.total)} → ${usd(a)}` : `Total: ${usd(a)}`); s.total = a; s.priceBy = author }
         } else if (a !== s.total) {
           s.pending = fresh = { kind: 'price', amount: a, by: author }
@@ -235,4 +235,77 @@ export function mediateDemo(room, { names, joined }) {
   if (!say.length && changed && next.questions[0]) say.push(`Open: ${next.questions[0].text}`)
 
   return { reply: say.join(' '), suggestions: suggestions.slice(0, 3), changes: changed ? changes.slice(0, 6) : [], terms: next }
+}
+
+// ---------------------------------------------------------------- negotiating agents (demo)
+const AGENT_TURNS = 6
+const tokens = (s) => s.toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 3).map((w) => w.replace(/s$/, ''))
+const mentions = (list, phrase) => {
+  const hay = list.join(' ').toLowerCase()
+  return tokens(phrase).some((t) => hay.includes(t))
+}
+
+/**
+ * One move for a negotiating agent: say | accept | hand_back | wait. Same guardrails as the server's
+ * agent: never accepts outside the price and time limits, concedes in steps, hands back after
+ * AGENT_TURNS, and never states its limit.
+ */
+export function agentMove(room, m, names, lastParty) {
+  const role = m.role
+  const s = room.demo
+  const t = room.terms
+  const name = names[role] || role
+  const total = t.milestones.reduce((x, ms) => x + ms.amount_cents, 0)
+  const due = Math.max(0, ...t.milestones.map((ms) => ms.due_days || 0))
+  const mineV = role === 'client' ? room.clientV : room.freelancerV
+  const intro = m.turns === 0 ? `I'm negotiating for ${name}. ` : ''
+  const problems = []
+  if (!t.milestones.length) problems.push('price')
+  if (m.limitCents && total && (role === 'client' ? total > m.limitCents : total < m.limitCents)) problems.push('price')
+  if (m.deadlineDays && due && (role === 'client' ? due > m.deadlineDays : due < m.deadlineDays)) problems.push('time')
+  const missing = role === 'client'
+    ? (m.mustHaves || []).filter((x) => !mentions(t.scope, x))
+    : (m.mustHaves || []).filter((x) => mentions(t.scope, x))
+  const fits = !problems.length && !missing.length
+  const myTurn = !lastParty || lastParty.author !== role || (fits && mineV !== t.version) || m.turns === 0
+  // an open price proposal from the other side gets an answer, even when the sheet already suits this side
+  const theirs = s.pending?.kind === 'price' && s.pending.by !== role && lastParty?.author !== role ? s.pending.amount : null
+  if (!myTurn || (fits && mineV === t.version && theirs == null)) return { action: 'wait' }
+  if (m.turns >= AGENT_TURNS) return { action: 'hand_back', message: `${name} will take it from here personally.`, reason: `No terms within your limits after ${AGENT_TURNS} turns.` }
+  const round = (c) => Math.round(c / 5000) * 5000
+  if (theirs != null) {
+    const ok = !m.limitCents || (role === 'client' ? theirs <= m.limitCents : theirs >= m.limitCents)
+    if (ok) return { action: 'say', message: `${intro}${usd(theirs)} works for me.`, reason: `${usd(theirs)} is within your limit.` }
+    const counter = role === 'client'
+      ? (m.turns === 0 ? round(Math.min(m.limitCents, (theirs + m.limitCents * 0.8) / 2)) : m.limitCents)
+      : Math.max(m.limitCents, round((theirs + Math.max(total, m.limitCents * 1.1)) / 2))
+    const why = role === 'client' ? 'That keeps the scope as agreed and fits what this project can carry.' : 'That covers the scope as agreed, with time to test it properly.'
+    return { action: 'say', message: `${intro}Could we settle at ${usd(counter)}? ${why}`, reason: `Countered ${usd(theirs)}.` }
+  }
+
+  if (fits) {
+    return m.autoAccept
+      ? { action: 'accept', message: `${intro}This works for ${name}. Accepting version ${t.version}.`, reason: `Version ${t.version} is within every limit you set.` }
+      : { action: 'hand_back', message: `${intro}These terms work. ${name} will confirm personally.`, reason: `Version ${t.version} fits your limits — accept it yourself to lock the terms.` }
+  }
+  if (problems.includes('price') && m.limitCents) {
+    const p = s.pending?.kind === 'price' && s.pending.by !== role ? s.pending.amount : null
+    const ok = p && (role === 'client' ? p <= m.limitCents : p >= m.limitCents)
+    if (ok) return { action: 'say', message: `${intro}${usd(p)} works for me.`, reason: `${usd(p)} is within your limit.` }
+    const opening = role === 'client' ? round(Math.min(m.limitCents * 0.9, Math.max(total, m.limitCents * 0.8))) : round(m.limitCents * 1.1)
+    const offer = m.turns === 0 ? opening : m.limitCents
+    const why = role === 'client' ? 'That keeps the scope as agreed and fits what this project can carry.' : 'That covers the scope as agreed, with time to test it properly.'
+    return { action: 'say', message: `${intro}Could we settle at ${usd(offer)}? ${why}`, reason: m.turns === 0 ? 'Opened with room to move.' : 'Moved to your limit.' }
+  }
+  if (problems.includes('time') && m.deadlineDays) {
+    return role === 'client'
+      ? { action: 'say', message: `${intro}Could the launch be within ${m.deadlineDays} days?`, reason: 'The launch was later than your limit.' }
+      : { action: 'say', message: `${intro}To do this well I'd need ${m.deadlineDays} days.`, reason: 'The timeline was shorter than you need.' }
+  }
+  if (missing.length) {
+    return role === 'client'
+      ? { action: 'say', message: `${intro}${missing[0].charAt(0).toUpperCase() + missing[0].slice(1)} needs to be part of this.`, reason: `"${missing[0]}" was not in scope.` }
+      : { action: 'say', message: `${intro}Let's leave ${missing[0]} out for now — it can be a separate job.`, reason: `"${missing[0]}" was in scope.` }
+  }
+  return { action: 'wait' }
 }

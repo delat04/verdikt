@@ -7,6 +7,7 @@
     payout    : retry paying the freelancer (e.g. once they've added a PayPal email)   (either party)
     ============================================================================ */
 
+import { config } from '../config.js'
 import * as paypal from '../lib/paypal.js'
 import { db, audit } from '../lib/supabase.js'
 import { requireUser, milestoneFor } from '../lib/auth.js'
@@ -26,6 +27,8 @@ export default async function escrowRoutes(app) {
       referenceId: m.id,
       description: `${m.contract.title} — M${m.position} ${m.title}`,
       requestId: `fund-${m.id}-${Date.now()}`,
+      returnUrl: `${config.appUrl}/contracts/${m.contract.id}?paypal=approved&milestone=${m.id}`,
+      cancelUrl: `${config.appUrl}/contracts/${m.contract.id}?paypal=cancelled&milestone=${m.id}`,
     })
     await db().from('milestones').update({ paypal_order_id: order.id }).eq('id', m.id)
     await audit({ contractId: m.contract.id, milestoneId: m.id, actor: 'client', event: 'escrow.order_created', payload: { orderId: order.id } })

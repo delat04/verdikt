@@ -133,6 +133,20 @@ function act(action) {
   }
 }
 
+// back from paypal.com after approving a hold from a link (e.g. one an AI agent sent): place it now
+watch(() => [contract.value?.id, route.query.paypal], async ([id, pp]) => {
+  if (!id || !pp) return
+  const mid = route.query.milestone
+  router.replace({ query: { ...route.query, paypal: undefined, milestone: undefined } })
+  if (pp !== 'approved') return toast('PayPal approval cancelled — nothing was held')
+  try {
+    await api.authorizeOrder(mid)
+    toast('Held in PayPal escrow — you are charged only when the work passes', { tone: 'ok' })
+  } catch (e) {
+    toast(e.message, { tone: 'danger' })
+  }
+}, { immediate: true })
+
 // arriving with ?act=… (the queue, ⌘K, Home's "Up next"): open that action once it applies, then drop the query
 watch([step, () => route.query.act], ([s, want]) => {
   if (!s || !want) return

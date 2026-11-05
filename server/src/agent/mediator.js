@@ -8,6 +8,7 @@
 
 import { callTool } from './claude.js'
 import { db, audit } from '../lib/supabase.js'
+import { negotiateSoon } from './negotiator.js'
 
 const SYSTEM = `You are Verdikt's mediator in a contract room where a client and a freelancer agree the terms of a software
 project before any money is held in PayPal escrow. Later an AI verifier will check the delivered work against these
@@ -118,6 +119,8 @@ async function loop(contractId) {
     running.delete(contractId)
     await db().from('contracts').update({ mediator_busy: false }).eq('id', contractId)
   }
+  // with the sheet settled, any negotiating agent takes its turn
+  negotiateSoon(contractId)
 }
 
 async function mediate(contractId) {
@@ -125,7 +128,7 @@ async function mediate(contractId) {
   const { data: c } = await db().from('contracts')
     .select('id, title, brief, currency, terms, client:profiles!contracts_client_id_fkey(display_name), freelancer:profiles!contracts_freelancer_id_fkey(display_name)')
     .eq('id', contractId).single()
-  const { data: msgs } = await db().from('room_messages').select('author, body, created_at').eq('contract_id', contractId)
+  const { data: msgs } = await db().from('room_messages').select('author, body, via_agent, created_at').eq('contract_id', contractId)
     .order('created_at', { ascending: false }).limit(40)
   const names = { client: c.client?.display_name || 'the client', freelancer: c.freelancer?.display_name || 'the freelancer (not joined yet)', agent: 'Verdikt', system: 'Room' }
   const terms = c.terms || emptyTerms()
@@ -141,7 +144,7 @@ async function mediate(contractId) {
       JSON.stringify({ ...terms, version: undefined }, null, 1),
       '',
       'Conversation, oldest first (the last line is the newest):',
-      ...[...(msgs || [])].reverse().map((m) => `${names[m.author]}${['client', 'freelancer'].includes(m.author) ? ` (${m.author})` : ''}: ${m.body}`),
+      ...[...(msgs || [])].reverse().map((m) => `${names[m.author]}${m.via_agent ? "'s negotiating agent" : ''}${['client', 'freelancer'].includes(m.author) ? ` (${m.author})` : ''}: ${m.body}`),
       '',
       'Call update_room.',
     ].join('\n'),

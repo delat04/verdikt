@@ -4,27 +4,12 @@
 
 import { db, audit } from '../lib/supabase.js'
 import { requireUser, milestoneFor } from '../lib/auth.js'
-import { draftCriteria, fallbackCriteria } from '../agent/draft.js'
+import { draftInBackground } from '../lib/room.js'
 import { mediateSoon } from '../agent/mediator.js'
 
 const MAX_MILESTONES = 6
 const KINDS = ['visual', 'functional', 'code', 'performance', 'content']
-
-export async function draftInBackground(contract, milestones) {
-  let drafted
-  try {
-    drafted = await draftCriteria({ title: contract.title, brief: contract.brief, milestones })
-  } catch (e) {
-    console.error('drafting failed', e)
-    await audit({ contractId: contract.id, actor: 'agent', event: 'terms.draft_failed', payload: { message: e.message } })
-  }
-  const rows = milestones.flatMap((m) => (drafted?.get(m.position) || fallbackCriteria(m)).map((c, i) => ({
-    milestone_id: m.id, position: i + 1, kind: KINDS.includes(c.kind) ? c.kind : 'functional', statement: c.statement, method: c.method || '',
-  })))
-  await db().from('criteria').insert(rows)
-  await db().from('contracts').update({ status: 'negotiating' }).eq('id', contract.id)
-  await audit({ contractId: contract.id, actor: 'agent', event: 'terms.drafted', payload: { criteria: rows.length } })
-}
+export { draftInBackground }
 
 function invitePreview(c) {
   const inviter = c.client || c.freelancer

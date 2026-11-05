@@ -10,6 +10,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useTheme } from '@/composables/useTheme'
 import { toast } from '@/composables/useToast'
 import { isDemo } from '@/services'
+import AgentAccess from '@/components/AgentAccess.vue'
 
 const auth = useAuthStore()
 const { theme, setTheme } = useTheme()
@@ -60,6 +61,8 @@ async function save() {
             <div><VButton type="submit" :loading="busy">Save changes</VButton></div>
           </form>
         </VCard>
+
+        <AgentAccess />
 
         <VCard title="Appearance">
           <VSegmented

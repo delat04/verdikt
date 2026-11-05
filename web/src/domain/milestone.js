@@ -177,6 +177,10 @@ export function nextStep(contract, role) {
         title: `Invite ${role === 'client' ? 'your freelancer' : 'your client'} to the room`,
         sub: 'Shape the terms together. The mediator keeps the sheet current as you talk.' }
     }
+    if (r.mandate?.active && mine !== v) {
+      return { ...room, key: 'room-my-agent', tone: 'accent', actor: 'agent', short: 'Your agent is negotiating',
+        title: 'Your agent is negotiating for you', sub: 'It stays within your private limits and accepts only terms that fit.' }
+    }
     if (r.busy) {
       return { ...room, key: 'room-agent', tone: 'warn', actor: 'agent', short: 'Mediator updating',
         title: 'The mediator is updating the terms', sub: 'It rereads the conversation and keeps the sheet current.' }

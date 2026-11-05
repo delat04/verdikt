@@ -5,7 +5,8 @@
     ============================================================================ */
 
 import { split, money } from '@/domain/format'
-import { mediateDemo, emptyTerms, blankState } from './demoMediator'
+import { mediateDemo, agentMove, emptyTerms, blankState } from './demoMediator'
+import { askLocal } from '@/domain/ledgerAsk'
 
 const KEY = 'verdikt-demo-v1'
 const listeners = new Set()
@@ -357,6 +358,53 @@ async function runRoom(contractId) {
   } finally {
     mediating.delete(contractId)
   }
+  runAgents(contractId)
+}
+
+// negotiating agents: one speaks (or accepts) per pass, then the mediator answers
+async function runAgents(contractId) {
+  await wait(900 + Math.random() * 600)
+  const c = db.contracts.find((x) => x.id === contractId)
+  if (!c?.room || c.status !== 'scoping' || c.room.busy) return
+  const mandates = Object.values(c.room.mandates || {}).filter((m) => m.active)
+  if (!mandates.length) return
+  const lastParty = [...c.room.messages].reverse().find((m) => m.author === 'client' || m.author === 'freelancer')
+  const ordered = [...mandates.filter((m) => m.role !== lastParty?.author), ...mandates.filter((m) => m.role === lastParty?.author)]
+  for (const m of ordered) {
+    if (!c[m.role]) continue
+    const move = agentMove(c.room, m, roomNames(c), lastParty)
+    if (move.action === 'wait') continue
+    const name = c[m.role].name.split(' ')[0]
+    if (move.action === 'hand_back') {
+      Object.assign(m, { active: false, status: 'handed_back', statusNote: move.reason })
+      if (move.message) say(c, m.role, move.message, { viaAgent: true })
+      log(c, m.role, 'room.agent_handed_back', { viaAgent: true })
+      save()
+      return
+    }
+    m.turns += 1
+    m.statusNote = move.reason
+    if (move.message) say(c, m.role, move.message, { viaAgent: true })
+    if (move.action === 'accept') {
+      acceptRoom(c, m.role, c.room.terms.version, { viaAgent: true, name })
+      save()
+      if (c.status === 'scoping') runAgents(c.id)   // the other side's agent may accept the same version now
+      return
+    }
+    log(c, m.role, 'room.agent_spoke', { viaAgent: true })
+    save()
+    runRoom(c.id)
+    return
+  }
+}
+function acceptRoom(c, role, version, { viaAgent = false, name } = {}) {
+  c.room[role === 'client' ? 'clientV' : 'freelancerV'] = version
+  say(c, 'system', `${viaAgent ? `${name}'s agent` : c[role].name} accepted version ${version}.`, { version })
+  log(c, role, 'room.accepted', { version, viaAgent })
+  if (c.room.clientV === version && c.room.freelancerV === version) {
+    for (const m of Object.values(c.room.mandates || {})) if (m.active) Object.assign(m, { active: false, status: 'accepted' })
+    lockRoom(c)
+  }
 }
 function roomOf(contractId) {
   const c = findContract(contractId)
@@ -439,8 +487,14 @@ export const demo = {
   async getContract(id) {
     await latency()
     const c = findContract(id)
-    assertParty(c)
-    return clone(c)
+    const role = assertParty(c)
+    const out = clone(c)
+    if (out.room) {
+      out.room.mandate = out.room.mandates?.[role] || null
+      delete out.room.mandates
+      delete out.room.demo
+    }
+    return out
   },
   async createContract({ role, title, brief, counterpartEmail, currency = 'USD', milestones }) {
     await latency()
@@ -537,12 +591,34 @@ export const demo = {
     if (version !== t.version) throw new Error('The terms changed while you were reading — check the latest version')
     if (!c.client || !c.freelancer) throw new Error('Both of you need to be in the room first')
     if (!t.milestones.length) throw new Error('The terms need at least one milestone with a price')
-    c.room[role === 'client' ? 'clientV' : 'freelancerV'] = version
-    say(c, 'system', `${c[role].name} accepted version ${version}.`, { version })
-    log(c, role, 'room.accepted', { version })
-    if (c.room.clientV === version && c.room.freelancerV === version) lockRoom(c)
+    acceptRoom(c, role, version)
     save()
+    runAgents(c.id)
     return { ok: true, locked: c.status !== 'scoping' }
+  },
+  async setMandate(contractId, { limitCents, deadlineDays, mustHaves = [], notes = '', autoAccept = true }) {
+    await latency()
+    const { c, role } = roomOf(contractId)
+    if (!limitCents && !deadlineDays && !mustHaves.length) throw new Error('Give your agent at least one limit or must-have')
+    c.room.mandates ||= {}
+    const was = c.room.mandates[role]?.active
+    c.room.mandates[role] = {
+      role, limitCents: limitCents || null, deadlineDays: deadlineDays || null, mustHaves: mustHaves.filter(Boolean).slice(0, 8),
+      notes, autoAccept, active: true, status: 'negotiating', statusNote: '', turns: 0,
+    }
+    if (!was) say(c, 'system', `${c[role].name} handed the negotiation to an agent. It speaks for them within limits only they can see.`)
+    log(c, role, 'room.agent_on', {})
+    save()
+    runAgents(c.id)
+  },
+  async stopMandate(contractId) {
+    await latency()
+    const { c, role } = roomOf(contractId)
+    const m = c.room.mandates?.[role]
+    if (m) Object.assign(m, { active: false, status: 'paused' })
+    say(c, 'system', `${c[role].name} is back in the room in person.`)
+    log(c, role, 'room.agent_off', {})
+    save()
   },
 
   // ---- terms
@@ -664,6 +740,10 @@ export const demo = {
   },
 
   // ---- PayPal disputes (simulated: a client disputes a paid milestone, the agent answers)
+  async askLedger(question) {
+    await wait(500 + Math.random() * 400)
+    return askLocal(question)
+  },
   async syncDisputes() {
     await latency()
     return { checked: 0, added: 0 }

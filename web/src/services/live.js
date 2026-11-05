@@ -77,7 +77,7 @@ function mapContract(c) {
     room: c.terms ? {
       terms: c.terms, clientV: c.terms_client_v, freelancerV: c.terms_freelancer_v, busy: !!c.mediator_busy,
       messages: [...(c.room_messages || [])].sort((a, b) => a.created_at.localeCompare(b.created_at)).map((x) => ({
-        id: x.id, author: x.author, body: x.body, suggestions: x.suggestions || [], changes: x.changes || [], version: x.version, createdAt: x.created_at,
+        id: x.id, author: x.author, body: x.body, viaAgent: !!x.via_agent, suggestions: x.suggestions || [], changes: x.changes || [], version: x.version, createdAt: x.created_at,
       })),
     } : null,
     activity: [...(c.audit_log || [])].sort((a, b) => b.created_at.localeCompare(a.created_at)).map((a) => ({
@@ -103,6 +103,7 @@ export const live = {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'appeals' }, fn)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'disputes' }, fn)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_messages' }, fn)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_mandates' }, fn)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'audit_log' }, fn)
       .subscribe()
     const { data } = supabase.auth.onAuthStateChange(() => fn())
@@ -153,7 +154,16 @@ export const live = {
   async getContract(id) {
     const { data, error } = await supabase.from('contracts').select(`${CONTRACT_SELECT}, audit_log(*)`).eq('id', id).single()
     if (error) throw new Error('Contract not found')
-    return mapContract(data)
+    const c = mapContract(data)
+    // your negotiating agent's mandate — row-level security returns only your own
+    if (c.room) {
+      const { data: md } = await supabase.from('room_mandates').select('*').eq('contract_id', id).maybeSingle()
+      c.room.mandate = md && {
+        role: md.role, limitCents: md.limit_cents, deadlineDays: md.deadline_days, mustHaves: md.must_haves || [], notes: md.notes,
+        autoAccept: md.auto_accept, active: md.active, status: md.status, statusNote: md.status_note, turns: md.turns,
+      }
+    }
+    return c
   },
   createContract: (payload) => call('/contracts', { body: payload }),
   previewInvite: (code) => call(`/invites/${encodeURIComponent(code)}`, { method: 'GET' }),
@@ -164,6 +174,8 @@ export const live = {
   sendRoomMessage: (contractId, body) => call(`/contracts/${contractId}/room/messages`, { body: { body } }),
   askMediator: (contractId) => call(`/contracts/${contractId}/room/ask`),
   acceptTerms: (contractId, version) => call(`/contracts/${contractId}/room/accept`, { body: { version } }),
+  setMandate: (contractId, mandate) => call(`/contracts/${contractId}/room/mandate`, { body: mandate }),
+  stopMandate: (contractId) => call(`/contracts/${contractId}/room/mandate/stop`),
 
   // ---- terms
   updateCriteria: (milestoneId, criteria) => call(`/milestones/${milestoneId}/criteria`, { method: 'PUT', body: { criteria } }),
@@ -182,6 +194,10 @@ export const live = {
   acceptAppeal: (appealId) => call(`/appeals/${appealId}/accept`),
   declineAppeal: (appealId) => call(`/appeals/${appealId}/decline`),
   syncDisputes: () => call('/disputes/sync'),
+  askLedger: (question, columns) => call('/ledger/ask', { body: { question, columns } }),
+  listAgentTokens: () => call('/agent-tokens', { method: 'GET' }),
+  createAgentToken: (label) => call('/agent-tokens', { body: { label } }),
+  revokeAgentToken: (id) => call(`/agent-tokens/${id}/revoke`),
   simulateDispute: null,
 
   loadSample: null,

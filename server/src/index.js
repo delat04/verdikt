@@ -10,10 +10,14 @@ import deliveryRoutes from './routes/delivery.js'
 import webhookRoutes from './routes/webhooks.js'
 import disputeRoutes from './routes/disputes.js'
 import roomRoutes from './routes/room.js'
+import ledgerRoutes from './routes/ledger.js'
+import agentRoutes from './routes/agents.js'
+import mcpRoutes from './routes/mcp.js'
 import { renewHolds, resumePayouts } from './lib/flow.js'
 import { syncDisputes } from './agent/defense.js'
 import { resumeVerifications } from './agent/verify.js'
 import { resumeAppeals } from './agent/appeal.js'
+import { resumeRooms } from './agent/negotiator.js'
 
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL || 'info' } })
 
@@ -48,6 +52,10 @@ await app.register(deliveryRoutes, { prefix: '/api' })
 await app.register(webhookRoutes, { prefix: '/api' })
 await app.register(disputeRoutes, { prefix: '/api' })
 await app.register(roomRoutes, { prefix: '/api' })
+await app.register(ledgerRoutes, { prefix: '/api' })
+await app.register(agentRoutes, { prefix: '/api' })
+// any AI agent can use Verdikt with a personal token: Streamable HTTP MCP at /mcp
+await app.register(mcpRoutes)
 
 // Deployed, the built web app ships in the same image (WEB_DIST): serve it, with long caching for the
 // hashed assets, and hand every other GET to the app's router so deep links like /contracts/:id work
@@ -78,6 +86,6 @@ every(30 * 60_000, renewHolds, 'hold renewal')
 every(10 * 60_000, syncDisputes, 'dispute sync')
 
 // Work that a restart interrupted picks up where it left off: checks, second reviews, payouts in flight
-Promise.all([resumeVerifications(), resumeAppeals(), resumePayouts()])
+Promise.all([resumeVerifications(), resumeAppeals(), resumePayouts(), resumeRooms()])
   .then(([v, a, p]) => { if (v + a + p) app.log.info({ verifications: v, appeals: a, payouts: p }, 'resumed interrupted work') })
   .catch((e) => app.log.warn({ err: e.message }, 'resume failed'))

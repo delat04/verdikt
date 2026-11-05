@@ -1,7 +1,7 @@
 <!-- Landing — the pitch in one scroll: the promise, the proof (a real verdict), how it works, who it's for. -->
 <script setup>
 import { computed } from 'vue'
-import { ArrowRight, PenLine, Wallet, ScanSearch, Banknote, Check, X, Briefcase, Code2 } from 'lucide-vue-next'
+import { ArrowRight, PenLine, Wallet, ScanSearch, Banknote, Check, X, Briefcase, Code2, MessagesSquare, Bot, Plug, ShieldCheck } from 'lucide-vue-next'
 import BrandMark from '@/components/BrandMark.vue'
 import VButton from '@/components/ui/VButton.vue'
 import VPill from '@/components/ui/VPill.vue'
@@ -20,8 +20,16 @@ const checks = [
   { ok: true, text: 'LCP under 2.5 s on a mid-range phone' },
 ]
 
+// agents bargain and work; people decide where money moves
+const agents = [
+  { icon: MessagesSquare, title: 'A mediator in the room', text: 'After every message it updates a versioned terms sheet, proposes fair trades when price and scope don’t meet, and names the question that blocks agreement.' },
+  { icon: Bot, title: 'An agent that bargains for you', text: 'Give it a private mandate — your price limit, your deadline, your must-haves. It negotiates, never reveals them, and accepts only terms that fit. The limits are enforced in code.' },
+  { icon: Plug, title: 'Any AI agent can hire', text: 'Claude Desktop, Claude Code or any MCP client connects with a personal token: open a room, negotiate, fund, deliver, read the verdict — 13 tools.' },
+  { icon: ShieldCheck, title: 'Money still needs a person', text: 'An agent can agree terms and create the PayPal hold link. Only the client approves the hold, and only passing checks release it.' },
+]
+
 const steps = [
-  { icon: PenLine, title: 'Agree on checkable terms', text: 'Describe the work in plain words. The agent turns it into acceptance criteria it can test. Both sides edit and sign.' },
+  { icon: PenLine, title: 'Agree the terms together', text: 'Talk it through in a contract room. A neutral AI mediator keeps a versioned terms sheet and turns wishes into checks it can test.' },
   { icon: Wallet, title: 'PayPal holds the money', text: 'The client funds each milestone with a PayPal authorization — a hold, not a charge.' },
   { icon: ScanSearch, title: 'The agent checks the delivery', text: 'It opens the live site at desktop and mobile sizes, runs each check, reads the repo, and keeps the evidence.' },
   { icon: Banknote, title: 'Proven → released', text: 'Every check passes: PayPal captures and the freelancer is paid. Not yet: it stays held, and both sides see why.' },
@@ -91,6 +99,19 @@ const steps = [
           <p>{{ s.text }}</p>
         </li>
       </ol>
+    </section>
+
+    <!-- agents -->
+    <section class="how agents">
+      <p class="vk-eyebrow">Agentic commerce, with a person in charge of the money</p>
+      <h2 class="sec__title">Agents bargain and deliver. People decide where the money moves.</h2>
+      <ul class="how__grid">
+        <li v-for="a in agents" :key="a.title" class="how__item">
+          <span class="how__icon"><component :is="a.icon" :size="18" :stroke-width="1.9" /></span>
+          <h3>{{ a.title }}</h3>
+          <p>{{ a.text }}</p>
+        </li>
+      </ul>
     </section>
 
     <!-- sides -->

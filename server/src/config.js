@@ -6,6 +6,8 @@ function required(name) {
 
 export const config = {
   port: Number(process.env.PORT || 4100),
+  // where people land after approving a PayPal hold from a link (Render sets RENDER_EXTERNAL_URL)
+  appUrl: (process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:5180').replace(/\/$/, ''),
   corsOrigin: (process.env.CORS_ORIGIN || 'http://localhost:5180').split(',').map((s) => s.trim()),
 
   paypal: {

@@ -24,6 +24,8 @@ const busy = ref(false)
 const error = ref('')
 const sdkError = ref('')
 const buttons = ref(null)
+const message = ref(null)
+const dark = () => document.documentElement.dataset.theme === 'dark' || (!document.documentElement.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches)
 
 function loadSdk() {
   if (window.paypal) return Promise.resolve(window.paypal)
@@ -31,7 +33,7 @@ function loadSdk() {
   if (!clientId) return Promise.reject(new Error('VITE_PAYPAL_CLIENT_ID is not set'))
   return new Promise((resolve, reject) => {
     const s = document.createElement('script')
-    s.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}&intent=authorize&currency=${props.currency}&components=buttons`
+    s.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}&intent=authorize&currency=${props.currency}&components=buttons,messages&enable-funding=paylater`
     s.onload = () => resolve(window.paypal)
     s.onerror = () => reject(new Error('Could not load PayPal'))
     document.head.appendChild(s)
@@ -61,6 +63,15 @@ async function renderButtons() {
       },
       onError: (e) => { error.value = e?.message || 'PayPal could not complete the hold.' },
     }).render(buttons.value)
+    // Pay Later: PayPal decides eligibility (buyer, country, amount) and shows the offer only when it applies
+    if (message.value && paypal.Messages) {
+      message.value.innerHTML = ''
+      paypal.Messages({
+        amount: props.milestone.amountCents / 100,
+        placement: 'payment',
+        style: { layout: 'text', logo: { type: 'inline' }, text: { size: 12, color: dark() ? 'white' : 'black' } },
+      }).render(message.value).catch(() => {})
+    }
   } catch (e) {
     sdkError.value = e.message
   }
@@ -117,6 +128,7 @@ function done() {
       <!-- live: PayPal smart buttons -->
       <div v-else>
         <div ref="buttons" class="pp-live" />
+        <div ref="message" class="pp-msg" aria-label="PayPal Pay Later offer" />
         <p v-if="sdkError" class="vk-field__error">{{ sdkError }}</p>
         <p v-if="busy" class="vk-faint fund__busy"><span class="vk-spin" /> Placing the hold…</p>
       </div>
@@ -135,5 +147,6 @@ function done() {
 .pp__logo { font: italic 400 18px/1 var(--vk-font); color: color-mix(in srgb, #003087 55%, var(--vk-ink)); letter-spacing: -.02em; }
 .pp__row { display: flex; justify-content: space-between; gap: 12px; font: var(--vk-type-dense); }
 .pp-live { min-height: 52px; }
+.pp-msg:not(:empty) { margin-top: 10px; }
 .fund__busy { display: flex; align-items: center; gap: 8px; font: var(--vk-type-small); }
 </style>

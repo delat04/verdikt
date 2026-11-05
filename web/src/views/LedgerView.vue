@@ -1,4 +1,6 @@
 <!--
+  Ask it in plain words ("held over $500", "what did I pay Sam this month") and Claude sets the grid's
+  filters and sort — it only sees the column schema, never the money.
   Ledger — every milestone across every contract as one AG Grid: what was held, released, returned,
   kept as fee and paid out, with the PayPal ids behind each number. Freelancers read it as earnings
   across clients ("Money in"), clients as spend ("Money out"). The head stays put; the grid fills the rest.
@@ -9,7 +11,8 @@ import { ref, computed, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { AgGridVue } from 'ag-grid-vue3'
 import { ModuleRegistry, AllCommunityModule, themeQuartz } from 'ag-grid-community'
-import { Download, Search } from 'lucide-vue-next'
+import { Download, Search, ScanSearch, X, CornerDownLeft } from 'lucide-vue-next'
+import { LEDGER_SCHEMA, toGrid, describe } from '@/domain/ledgerAsk'
 import AppShell from '@/layouts/AppShell.vue'
 import VButton from '@/components/ui/VButton.vue'
 import VChips from '@/components/ui/VChips.vue'
@@ -92,6 +95,19 @@ function pill(label, tone) {
   return el
 }
 
+// ISO timestamps filtered by calendar day (Ask the ledger sends dates as YYYY-MM-DD)
+const dateFilter = {
+  filter: 'agDateColumnFilter',
+  filterParams: {
+    comparator: (day, value) => {
+      if (!value) return -1
+      const d = new Date(value)
+      const at = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+      return at < day.getTime() ? -1 : at > day.getTime() ? 1 : 0
+    },
+  },
+}
+
 const columnDefs = [
   { field: 'contract', headerName: 'Contract', pinned: 'left', minWidth: 220, flex: 1.4, cellClass: 'cell-strong' },
   { field: 'milestone', headerName: 'Milestone', minWidth: 200, flex: 1.2 },
@@ -114,8 +130,8 @@ const columnDefs = [
   },
   { field: 'checks', headerName: 'Checks met', width: 120, cellClass: 'vk-num', type: 'rightAligned' },
   { field: 'attempts', headerName: 'Attempts', width: 108, cellClass: 'vk-num', type: 'numericColumn', valueFormatter: (p) => (p.node?.rowPinned ? '' : p.value || '') },
-  { field: 'fundedAt', headerName: 'Funded', width: 112, valueFormatter: when, sort: 'desc' },
-  { field: 'releasedAt', headerName: 'Released on', width: 124, valueFormatter: when },
+  { field: 'fundedAt', headerName: 'Funded', width: 112, valueFormatter: when, sort: 'desc', ...dateFilter },
+  { field: 'releasedAt', headerName: 'Released on', width: 124, valueFormatter: when, ...dateFilter },
   ...IDS.map((k) => ({
     field: k, width: 190, cellClass: 'vk-num cell-id', tooltipValueGetter: (p) => (p.value ? 'Click to copy' : ''),
     headerName: { order: 'PayPal order', authorization: 'Authorization', capture: 'Capture', payoutBatch: 'Payout batch' }[k],
@@ -129,6 +145,7 @@ const pinned = ref([])
 function totals() {
   const list = []
   gridApi.value?.forEachNodeAfterFilter((n) => { if (n.data) list.push(n.data) })
+  shownCount.value = list.length
   pinned.value = [{
     contract: `Total · ${list.length} milestone${list.length === 1 ? '' : 's'}`,
     ...Object.fromEntries(MONEY.map((k) => [k, sum(list, k)])),
@@ -147,6 +164,37 @@ function onCell(e) {
   }
   router.push(`/contracts/${e.data.contractId}`)
 }
+// ---- ask the ledger
+const askText = ref('')
+const asking = ref(false)
+const asked = ref(null)          // { question, answer, filters, sort, side }
+const IDEAS = ['Held over $500', 'Disputes', 'Biggest payouts', 'What failed the checks?']
+async function ask(question = askText.value) {
+  const qn = question.trim()
+  if (!qn || asking.value) return
+  askText.value = qn
+  asking.value = true
+  try {
+    const v = await api.askLedger(qn, LEDGER_SCHEMA)
+    view.value = v.side || 'all'
+    const { model, state } = toGrid(v)
+    gridApi.value?.setFilterModel(Object.keys(model).length ? model : null)
+    if (state.length) gridApi.value?.applyColumnState({ state, defaultState: { sort: null } })
+    asked.value = { question: qn, ...v }
+  } catch (e) {
+    toast(e.message, { tone: 'danger' })
+  } finally {
+    asking.value = false
+  }
+}
+function clearAsk() {
+  asked.value = null
+  askText.value = ''
+  view.value = 'all'
+  gridApi.value?.setFilterModel(null)
+  gridApi.value?.applyColumnState({ state: [{ colId: 'fundedAt', sort: 'desc' }], defaultState: { sort: null } })
+}
+const shownCount = ref(0)
 const exportCsv = () => gridApi.value?.exportDataAsCsv({ fileName: `verdikt-ledger-${new Date().toISOString().slice(0, 10)}.csv` })
 
 // the grid speaks the design system: tokens in, so light and dark follow on their own
@@ -202,6 +250,23 @@ const theme = themeQuartz.withParams({
             <VButton variant="secondary" :icon="Download" @click="exportCsv">Export CSV</VButton>
           </div>
         </div>
+        <form class="ask" @submit.prevent="ask()">
+          <ScanSearch :size="16" :stroke-width="1.9" class="ask__icon" aria-hidden="true" />
+          <input v-model="askText" class="ask__input" placeholder="Ask your money a question — “held over $500”, “what did I pay Sam this month?”" aria-label="Ask the ledger" />
+          <VButton type="submit" size="sm" :loading="asking" :disabled="!askText.trim()" :icon-right="CornerDownLeft">Ask</VButton>
+        </form>
+        <div v-if="asked" class="asked" aria-live="polite">
+          <p class="asked__answer">{{ asked.answer }} <span class="vk-faint">· {{ shownCount }} row{{ shownCount === 1 ? '' : 's' }}</span></p>
+          <div class="asked__chips">
+            <span v-for="(f, i) in asked.filters" :key="i" class="asked__chip">{{ describe(f) }}</span>
+            <span v-for="(s, i) in asked.sort" :key="`s${i}`" class="asked__chip">Sorted by {{ s.field }} {{ s.dir === 'desc' ? '↓' : '↑' }}</span>
+            <button type="button" class="asked__clear" @click="clearAsk"><X :size="13" /> Clear</button>
+          </div>
+        </div>
+        <div v-else class="ideas">
+          <span class="vk-faint">Try</span>
+          <button v-for="i in IDEAS" :key="i" type="button" class="ideas__chip" @click="ask(i)">{{ i }}</button>
+        </div>
       </header>
 
       <div class="grid">
@@ -228,6 +293,24 @@ const theme = themeQuartz.withParams({
 
 <style scoped>
 .ledger { padding-bottom: 20px; }
+.ask {
+  display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 16px;
+  border: 1px solid var(--vk-line-strong); border-radius: var(--vk-r-full); background: var(--vk-surface);
+}
+.ask:focus-within { border-color: var(--vk-accent); box-shadow: 0 0 0 3px var(--vk-accent-soft); }
+.ask__icon { flex: none; color: var(--vk-accent-text); }
+.ask__input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font: var(--vk-type-body); color: var(--vk-ink); }
+.ask__input::placeholder { color: var(--vk-faint); }
+.asked { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
+.asked__answer { margin: 0; font: var(--vk-type-dense); color: var(--vk-ink); }
+.asked__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.asked__chip { padding: 3px 10px; border: 1px solid var(--vk-accent-line); border-radius: var(--vk-r-full); background: var(--vk-accent-soft); font: var(--vk-type-small); color: var(--vk-accent-text); }
+.asked__clear, .ideas__chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border: 1px solid var(--vk-line); border-radius: var(--vk-r-full);
+  background: var(--vk-surface); font: var(--vk-type-small); color: var(--vk-ink-2); cursor: pointer;
+}
+.asked__clear:hover, .ideas__chip:hover { border-color: var(--vk-line-strong); }
+.ideas { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font: var(--vk-type-small); }
 .head { padding-top: 20px; display: flex; flex-direction: column; gap: 18px; }
 .head__row { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px 40px; flex-wrap: wrap; }
 .head__title { margin: 0; font: 400 44px/1 var(--vk-font); letter-spacing: -.04em; }
