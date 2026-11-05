@@ -7,6 +7,7 @@ import escrowRoutes from './routes/escrow.js'
 import deliveryRoutes from './routes/delivery.js'
 import webhookRoutes from './routes/webhooks.js'
 import disputeRoutes from './routes/disputes.js'
+import roomRoutes from './routes/room.js'
 import { renewHolds, resumePayouts } from './lib/flow.js'
 import { syncDisputes } from './agent/defense.js'
 import { resumeVerifications } from './agent/verify.js'
@@ -44,6 +45,7 @@ await app.register(escrowRoutes, { prefix: '/api' })
 await app.register(deliveryRoutes, { prefix: '/api' })
 await app.register(webhookRoutes, { prefix: '/api' })
 await app.register(disputeRoutes, { prefix: '/api' })
+await app.register(roomRoutes, { prefix: '/api' })
 
 await app.listen({ port: config.port, host: '0.0.0.0' })
 

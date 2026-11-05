@@ -9,7 +9,8 @@ Freelancers get stiffed. Clients pay for work that isn't done. **Verdikt** turns
 ## The flow
 
 1. **Onboarding** — name, which side you're on, where payouts land (PayPal email).
-2. **New contract** — a 4-step wizard: your side → the brief in plain words → milestones (the last is the final payment) → review.
+2. **Contract room** (recommended) — instead of one side writing the terms, client and freelancer agree them in a live room with Claude as a **neutral mediator**. Open it with a sentence or two ("menu, hours and pickup pre-orders, about $1,500, live in 4 weeks"); after every message the mediator rereads the conversation and keeps a **versioned terms sheet** current — scope, out of scope, payments, dates and what "done" means for each payment. It turns vague wishes ("modern", "fast") into wording the verifier can test, proposes a **concrete trade** when money and scope don't meet ("keep $1,500 and leave card payments for later, or add them for $600"), and names the question that blocks agreement and who should answer it. Its suggestions are one-tap replies. When **both accept the same version**, the terms lock: the payments become milestones and the agreed "done means" lines seed the checks. A change after one side accepted means both accept again. The transcript stays on the contract, and the dispute agent cites it as evidence.
+   Or write the terms yourself — a 4-step wizard: your side → the brief in plain words → milestones (the last is the final payment) → review.
 3. **Terms** — Claude reads the brief and drafts **acceptance criteria it can actually test** (visual, functional, performance, content, code), each with a plain-language "how it's checked". Either side edits; editing resets both signatures. Both sign.
 4. **Escrow** — the client funds each milestone through PayPal: an Orders v2 order with `intent=AUTHORIZE` — a **hold, not a charge**.
 5. **Delivery** — the freelancer submits a live URL and a public GitHub repo.
@@ -30,7 +31,7 @@ npm install
 npm run dev        # http://localhost:5180
 ```
 
-With no Supabase keys the app runs in **demo mode** (or set `VITE_DEMO=true`): everything lives in your browser, PayPal and the agent are simulated, and the top bar lets you switch between the client (Maya) and the freelancer (Sam) to play both sides. "Load a sample contract" shows every state at once. The delivery form has three sample builds — *incomplete* (fail → fix → pass → release), *complete*, and *a build that tries to fool the AI* (the integrity guard catches it). On a failed milestone, appeal as Sam to see the second review recommend a partial release; on a paid one, *Simulate a buyer dispute* shows the agent answering it.
+With no Supabase keys the app runs in **demo mode** (or set `VITE_DEMO=true`): everything lives in your browser, PayPal and the agent are simulated, and the top bar lets you switch between the client (Maya) and the freelancer (Sam) to play both sides. "Load a sample contract" shows every state at once; "Open a sample contract room" drops you into a negotiation where the other side has already accepted — accept to lock it, or keep talking (the demo mediator is rule-based; live mode uses Claude). The delivery form has three sample builds — *incomplete* (fail → fix → pass → release), *complete*, and *a build that tries to fool the AI* (the integrity guard catches it). On a failed milestone, appeal as Sam to see the second review recommend a partial release; on a paid one, *Simulate a buyer dispute* shows the agent answering it.
 
 ## Run it for real (live mode)
 
@@ -70,10 +71,10 @@ With no Supabase keys the app runs in **demo mode** (or set `VITE_DEMO=true`): e
 | **PayPal MCP server + Disputes API** | When a buyer disputes a paid milestone, Claude reads it through PayPal's MCP server (`get_dispute`, `list_transactions` — an allowlist, nothing that moves money) via Anthropic's MCP connector; the answer goes back through the Disputes REST API (`provide-evidence`) | `server/src/agent/defense.js` |
 | **PayPal JS SDK** | Smart buttons with `intent=authorize` in the funding dialog | `web/src/components/FundModal.vue` |
 | **PayPal webhooks** | Signature-verified events: payments and payouts update milestones, disputes wake the defense agent, everything lands in the audit log | `server/src/routes/webhooks.js` |
-| **Claude (`claude-opus-5-5`)** | Five jobs, each a strict tool schema: **drafts** testable criteria from the brief · **verifies** every criterion from screenshots (vision), browser measurements, page text and repo files · flags **tampering** (text aimed at the verifier) · runs the **second review** on appeal (evidence screenshots by URL) · **answers PayPal disputes** with the record. Refusals fall back server-side. | `server/src/agent/` |
+| **Claude (`claude-opus-5-5`)** | Six jobs, each a strict tool schema: **mediates the contract room** (versioned terms sheet, testable wording, fair trades, blocking questions) · **drafts** testable criteria from the brief · **verifies** every criterion from screenshots (vision), browser measurements, page text and repo files · flags **tampering** (text aimed at the verifier) · runs the **second review** on appeal (evidence screenshots by URL) · **answers PayPal disputes** with the record. Refusals fall back server-side. | `server/src/agent/` |
 | **AG Grid** | The Ledger: every milestone across contracts — held, released, returned, fee, paid out — with PayPal ids, quick filter, pinned totals, CSV export, themed from the design tokens | `web/src/views/LedgerView.vue` |
 | **Playwright** | Real browser evidence at desktop and mobile sizes, plus a scan for text a person can't see but a model would | `server/src/agent/inspect.js`, `server/src/agent/guard.js` |
-| **Supabase** | Auth (magic link), Postgres with row-level security, realtime (live verdict progress), storage (evidence screenshots) | `supabase/migrations/` |
+| **Supabase** | Auth (magic link), Postgres with row-level security, realtime (the contract room, live verdict progress), storage (evidence screenshots) | `supabase/migrations/` |
 
 **Server scripts:** `npm run setup` (local key form) · `npm run db:migrate` (apply new migrations) · `npm run paypal:smoke` (the money flow without the UI).
 

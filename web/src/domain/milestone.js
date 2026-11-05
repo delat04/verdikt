@@ -20,6 +20,7 @@ export const STATUS = {
 }
 
 export const CONTRACT_STATUS = {
+  scoping:     { label: 'Contract room',  tone: 'accent' },
   drafting:    { label: 'Drafting terms', tone: 'warn', live: true },
   negotiating: { label: 'Signing terms',  tone: 'accent' },
   active:      { label: 'Active',         tone: 'accent' },
@@ -163,6 +164,36 @@ export function nextStep(contract, role) {
 
   if (contract.status === 'cancelled') {
     return { key: 'cancelled', tone: 'neutral', eyebrow: 'Closed', short: 'Cancelled', title: 'This contract was cancelled', sub: 'No money is held.', actor: 'none' }
+  }
+  if (contract.status === 'scoping') {
+    const r = contract.room || {}
+    const v = r.terms?.version || 0
+    const mine = role === 'client' ? r.clientV : r.freelancerV
+    const theirs = role === 'client' ? r.freelancerV : r.clientV
+    const room = { eyebrow: 'Contract room', milestoneId: null }
+    if (!other) {
+      return { ...room, key: 'room-invite', tone: 'accent', actor: 'you', action: 'invite',
+        short: `Invite your ${role === 'client' ? 'freelancer' : 'client'}`,
+        title: `Invite ${role === 'client' ? 'your freelancer' : 'your client'} to the room`,
+        sub: 'Shape the terms together. The mediator keeps the sheet current as you talk.' }
+    }
+    if (r.busy) {
+      return { ...room, key: 'room-agent', tone: 'warn', actor: 'agent', short: 'Mediator updating',
+        title: 'The mediator is updating the terms', sub: 'It rereads the conversation and keeps the sheet current.' }
+    }
+    if (!r.terms?.milestones?.length) {
+      return { ...room, key: 'room-shape', tone: 'accent', actor: 'you', action: 'room', short: 'Shape the terms',
+        title: 'Agree scope, price and dates', sub: 'Talk it through — the terms sheet fills in as you agree.' }
+    }
+    if (mine === v) {
+      return { ...room, key: 'room-wait', tone: 'neutral', actor: 'them', short: `${otherName} to accept v${v}`,
+        title: `Waiting for ${otherName} to accept version ${v}`, sub: 'When you both accept the same version, the terms lock and the checks are drafted.' }
+    }
+    return theirs === v
+      ? { ...room, key: 'room-accept', tone: 'accent', actor: 'you', action: 'room', short: `Accept v${v} to lock`,
+          title: `${otherName} accepted version ${v}`, sub: 'Accept it too and the terms lock into milestones.' }
+      : { ...room, key: 'room-review', tone: 'accent', actor: 'you', action: 'room', short: `Review terms v${v}`,
+          title: `Terms version ${v} is ready`, sub: 'Accept it, or say what should change.' }
   }
   if (contract.status === 'drafting') {
     return {

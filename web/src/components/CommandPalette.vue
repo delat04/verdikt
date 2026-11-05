@@ -9,6 +9,7 @@ import { useRouter } from 'vue-router'
 import {
   Search, FileText, Plus, KeyRound, Settings, Shapes, Sun, Moon, Monitor, Wallet, PenLine, Send, Eye,
   UserPlus, Users, RotateCcw, LayoutGrid, CornerDownLeft, ReceiptText,
+  MessagesSquare,
 } from 'lucide-vue-next'
 import { vGlide } from '@/directives/glide'
 import { useTheme } from '@/composables/useTheme'
@@ -65,6 +66,7 @@ const all = computed(() => {
     }
     items.push(
       { id: 'sample', group: 'Demo', icon: FileText, label: 'Load a sample contract', keys: 'example', run: async () => { const { id } = await api.loadSample(); router.push(`/contracts/${id}`) } },
+      { id: 'sample-room', group: 'Demo', icon: MessagesSquare, label: 'Open a sample contract room', keys: 'example negotiate mediator', run: async () => { const { id } = await api.loadRoomSample(); router.push(`/contracts/${id}`) } },
       { id: 'reset', group: 'Demo', icon: RotateCcw, label: 'Reset the demo', keys: 'clear', run: () => emit('reset') },
     )
   }

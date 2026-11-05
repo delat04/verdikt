@@ -15,6 +15,10 @@ const props = defineProps({
 
 const LABEL = {
   'contract.created': () => 'Contract created',
+  'room.opened': () => 'Opened the contract room',
+  'room.terms_updated': (p) => `Mediator updated the terms to v${p.version}${p.changes?.length ? ` · ${p.changes[0]}` : ''}`,
+  'room.accepted': (p) => `Accepted terms v${p.version}`,
+  'room.locked': (p) => `Both accepted v${p.version} — terms locked into ${p.milestones} milestone${p.milestones === 1 ? '' : 's'}`,
   'contract.joined': (p) => `${p.name || 'Counterparty'} joined`,
   'contract.active': () => 'Both parties signed — contract active',
   'contract.completed': () => 'Final milestone paid — contract complete',

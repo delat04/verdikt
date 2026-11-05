@@ -14,6 +14,8 @@ import { termsSigned } from '@/domain/milestone'
 
 const props = defineProps({ row: { type: Object, required: true } })   // { c, role, other, step, totals }
 const c = computed(() => props.row.c)
+const room = computed(() => (c.value.status === 'scoping' ? c.value.room?.terms : null))
+const onTable = computed(() => room.value?.milestones.reduce((s, m) => s + m.amount_cents, 0) || 0)
 const actor = computed(() => ({
   you: 'Your move',
   them: props.row.other ? `${firstName(props.row.other.name)}'s move` : 'Waiting',
@@ -34,10 +36,17 @@ const actor = computed(() => ({
     <h3 class="cc__title">{{ c.title }}</h3>
     <div class="cc__tags">
       <StatusPill :status="c.status" contract size="sm" />
-      <VPill size="sm" :dot="false" outline>{{ c.milestones.length }} milestone{{ c.milestones.length > 1 ? 's' : '' }}</VPill>
+      <VPill v-if="room" size="sm" :dot="false" outline>Terms v{{ room.version }}</VPill>
+      <VPill v-else size="sm" :dot="false" outline>{{ c.milestones.length }} milestone{{ c.milestones.length > 1 ? 's' : '' }}</VPill>
     </div>
 
-    <div class="cc__money">
+    <div v-if="room" class="cc__money">
+      <p class="cc__sum">
+        <span class="vk-num">{{ onTable ? money(onTable, c.currency, { whole: true }) : '—' }}</span>
+        <span class="vk-faint"> on the table · {{ room.milestones.length || 'no' }} payment{{ room.milestones.length === 1 ? '' : 's' }} drafted</span>
+      </p>
+    </div>
+    <div v-else class="cc__money">
       <MiniRail :milestones="c.milestones" :signed="termsSigned(c)" />
       <p class="cc__sum">
         <span class="vk-num cc__paid">{{ money(row.totals.released, c.currency, { whole: true }) }}</span>

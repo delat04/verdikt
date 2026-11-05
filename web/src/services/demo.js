@@ -4,7 +4,8 @@
     The agent and PayPal are simulated here; live mode calls the real ones.
     ============================================================================ */
 
-import { split } from '@/domain/format'
+import { split, money } from '@/domain/format'
+import { mediateDemo, emptyTerms, blankState } from './demoMediator'
 
 const KEY = 'verdikt-demo-v1'
 const listeners = new Set()
@@ -94,7 +95,11 @@ async function runDrafting(contractId) {
   await wait(2600)
   const c = db.contracts.find((x) => x.id === contractId)
   if (!c || c.status !== 'drafting') return
-  for (const m of c.milestones) m.criteria = draftCriteria(m, c.brief)
+  for (const m of c.milestones) {
+    const agreed = roomCriteria(m)
+    const extra = draftCriteria(m, c.brief).filter((x) => !agreed.some((a) => a.kind === x.kind))
+    m.criteria = [...agreed, ...extra].slice(0, 7).map((x, i) => ({ ...x, position: i + 1 }))
+  }
   c.status = 'negotiating'
   log(c, 'agent', 'terms.drafted', { criteria: c.milestones.reduce((s, m) => s + m.criteria.length, 0) })
   save()
@@ -320,6 +325,70 @@ function answerDispute(milestoneId, disputeId) {
   save()
 }
 
+// ---------------------------------------------------------------- the contract room
+const first = (p) => p?.name.split(' ')[0]
+const roomNames = (c) => ({ client: first(c.client), freelancer: first(c.freelancer) })
+function say(c, author, body, extra = {}) {
+  c.room.messages.push({ id: uid('rm'), author, body, suggestions: [], changes: [], version: null, createdAt: now(), ...extra })
+}
+const mediating = new Map()
+async function runRoom(contractId) {
+  if (mediating.has(contractId)) { mediating.set(contractId, true); return }
+  mediating.set(contractId, false)
+  try {
+    for (;;) {
+      const c0 = db.contracts.find((x) => x.id === contractId)
+      if (!c0?.room || c0.status !== 'scoping') return
+      c0.room.busy = true
+      save()
+      await wait(1300 + Math.random() * 900)
+      const c = db.contracts.find((x) => x.id === contractId)
+      if (!c?.room || c.status !== 'scoping') return
+      const out = mediateDemo(c.room, { names: roomNames(c), joined: { client: !!c.client, freelancer: !!c.freelancer } })
+      const changed = out.terms.version !== c.room.terms.version
+      c.room.terms = out.terms
+      if (out.reply || out.changes.length) say(c, 'agent', out.reply, { suggestions: out.suggestions, changes: out.changes, version: out.terms.version })
+      if (changed) log(c, 'agent', 'room.terms_updated', { version: out.terms.version, changes: out.changes.slice(0, 3) })
+      c.room.busy = false
+      save()
+      if (!mediating.get(contractId)) break
+      mediating.set(contractId, false)
+    }
+  } finally {
+    mediating.delete(contractId)
+  }
+}
+function roomOf(contractId) {
+  const c = findContract(contractId)
+  const role = assertParty(c)
+  if (c.status !== 'scoping') throw new Error('The terms are already locked')
+  return { c, role }
+}
+function lockRoom(c) {
+  const t = c.room.terms
+  c.brief = [t.summary, t.scope.length ? `In scope: ${t.scope.join('; ')}.` : '', t.out_of_scope.length ? `Out of scope: ${t.out_of_scope.join('; ')}.` : ''].filter(Boolean).join(' ') || c.brief
+  c.milestones = t.milestones.map((m, i) => ({
+    id: uid('m'), position: i + 1, title: m.title, description: m.done_means.map((d) => d.replace(/\.?$/, '.')).join(' '), doneMeans: m.done_means, amountCents: m.amount_cents,
+    dueAt: m.due_days > 0 ? new Date(Date.now() + m.due_days * 864e5).toISOString() : null, status: 'draft',
+    fundedAt: null, releasedAt: null, paypal: {}, criteria: [], submissions: [], appeals: [], disputes: [],
+  }))
+  c.status = 'drafting'
+  say(c, 'system', `Both of you accepted version ${t.version}. The terms are locked — the agent is turning each milestone into checks you'll sign.`, { version: t.version })
+  log(c, 'system', 'room.locked', { version: t.version, milestones: c.milestones.length })
+  runDrafting(c.id)
+}
+// a locked room's milestones start from the "done means" both parties agreed, then the standard checks fill the gaps
+function roomCriteria(m) {
+  const kindOf = (line) => (/Contentful|Lighthouse|under \d/i.test(line) ? 'performance'
+    : /375px|1440px|header|photo|visible/i.test(line) ? 'visual'
+    : /repo|build|secret/i.test(line) ? 'code'
+    : /menu|copy|lists/i.test(line) ? 'content' : 'functional')
+  return (m.doneMeans || []).slice(0, 5).map((line, i) => ({
+    id: uid('cr'), position: i + 1, kind: kindOf(line), statement: line.replace(/\.$/, ''),
+    method: 'Agreed in the contract room; checked against the live URL and repository.',
+  }))
+}
+
 // ---------------------------------------------------------------- public interface
 export const demo = {
   mode: 'demo',
@@ -403,9 +472,11 @@ export const demo = {
     if (!c) throw new Error('No contract matches this invite code.')
     const seat = !c.client ? 'client' : !c.freelancer ? 'freelancer' : null
     return {
-      id: c.id, title: c.title, brief: c.brief, currency: c.currency, seat,
+      id: c.id, title: c.title, brief: c.brief, currency: c.currency, seat, status: c.status,
       inviter: c.client || c.freelancer,
-      milestones: c.milestones.map((m) => ({ title: m.title, amountCents: m.amountCents })),
+      milestones: c.status === 'scoping'
+        ? c.room.terms.milestones.map((m) => ({ title: m.title, amountCents: m.amount_cents }))
+        : c.milestones.map((m) => ({ title: m.title, amountCents: m.amountCents })),
     }
   },
   async joinContract(code) {
@@ -418,8 +489,60 @@ export const demo = {
     else if (!c.freelancer) c.freelancer = party(u)
     else throw new Error('This contract already has both parties.')
     log(c, c.client.id === u.id ? 'client' : 'freelancer', 'contract.joined', { name: u.name })
+    if (c.status === 'scoping') {
+      say(c, 'system', `${u.name} joined the room.`)
+      runRoom(c.id)
+    }
     save()
     return { id: c.id }
+  },
+
+  // ---- the contract room
+  async openRoom({ role, title, idea, counterpartEmail, currency = 'USD' }) {
+    await latency()
+    if ((title || '').trim().length < 4) throw new Error('Give the project a title')
+    if ((idea || '').trim().length < 15) throw new Error('Say in a sentence or two what this is about')
+    const u = me()
+    const c = {
+      id: uid('c'), title: title.trim(), brief: idea.trim(), currency, status: 'scoping',
+      inviteCode: Math.random().toString(36).slice(2, 8).toUpperCase(),
+      inviteEmail: counterpartEmail?.trim() || '', createdAt: now(), createdBy: u.id,
+      client: role === 'client' ? party(u) : null, freelancer: role === 'freelancer' ? party(u) : null,
+      clientSignedAt: null, freelancerSignedAt: null, milestones: [], activity: [],
+      room: { terms: emptyTerms(), clientV: null, freelancerV: null, busy: false, messages: [], demo: blankState() },
+    }
+    say(c, role, idea.trim())
+    log(c, role, 'room.opened', { name: u.name })
+    db.contracts.unshift(c)
+    save()
+    runRoom(c.id)
+    return { id: c.id, inviteCode: c.inviteCode }
+  },
+  async sendRoomMessage(contractId, body) {
+    const { c, role } = roomOf(contractId)
+    const text = String(body || '').trim()
+    if (!text) throw new Error('Write something first')
+    say(c, role, text.slice(0, 2000))
+    save()
+    runRoom(c.id)
+  },
+  async askMediator(contractId) {
+    roomOf(contractId)
+    runRoom(contractId)
+  },
+  async acceptTerms(contractId, version) {
+    await latency()
+    const { c, role } = roomOf(contractId)
+    const t = c.room.terms
+    if (version !== t.version) throw new Error('The terms changed while you were reading — check the latest version')
+    if (!c.client || !c.freelancer) throw new Error('Both of you need to be in the room first')
+    if (!t.milestones.length) throw new Error('The terms need at least one milestone with a price')
+    c.room[role === 'client' ? 'clientV' : 'freelancerV'] = version
+    say(c, 'system', `${c[role].name} accepted version ${version}.`, { version })
+    log(c, role, 'room.accepted', { version })
+    if (c.room.clientV === version && c.room.freelancerV === version) lockRoom(c)
+    save()
+    return { ok: true, locked: c.status !== 'scoping' }
   },
 
   // ---- terms
@@ -611,6 +734,50 @@ export const demo = {
       { id: uid('a'), actor: 'system', event: 'contract.active', payload: {}, createdAt: t(8.4) },
       { id: uid('a'), actor: 'agent', event: 'terms.drafted', payload: {}, createdAt: t(8.9) },
       { id: uid('a'), actor: 'client', event: 'contract.created', payload: { milestones: 3 }, createdAt: t(9) },
+    ]
+    db.contracts.unshift(c)
+    save()
+    return { id: c.id }
+  },
+  // a room mid-conversation: the other side has already accepted the latest version
+  async loadRoomSample() {
+    const u = me()
+    const youAre = u.id === PERSONAS.client.id ? 'client' : 'freelancer'
+    const otherRole = youAre === 'client' ? 'freelancer' : 'client'
+    const maya = db.profiles[PERSONAS.client.id]
+    const sam = db.profiles[PERSONAS.freelancer.id]
+    let clock = Date.now() - 48 * 60000
+    const at = (min) => new Date((clock += min * 60000)).toISOString()
+    const opening = "We need a modern site for the café: the menu, opening hours, and a way to pre-order coffee for pickup. Budget is about $1,500 and we'd like it live in 4 weeks."
+    const c = {
+      id: uid('c'), title: 'Northbrew — café site with pickup orders', brief: opening, currency: 'USD', status: 'scoping',
+      inviteCode: Math.random().toString(36).slice(2, 8).toUpperCase(), inviteEmail: '', createdAt: at(0), createdBy: maya.id,
+      client: party(maya), freelancer: null, clientSignedAt: null, freelancerSignedAt: null, milestones: [], activity: [],
+      room: { terms: emptyTerms(), clientV: null, freelancerV: null, busy: false, messages: [], demo: blankState() },
+    }
+    const turn = (author, body, mins, craft) => {
+      say(c, author, body, { createdAt: at(mins) })
+      if (author === 'system') c.freelancer = party(sam)
+      const out = mediateDemo(c.room, { names: roomNames(c), joined: { client: true, freelancer: !!c.freelancer } })
+      c.room.terms = out.terms
+      const reply = craft ? craft(out) : out.reply
+      if (reply || out.changes.length) say(c, 'agent', reply, { suggestions: out.suggestions, changes: out.changes, version: out.terms.version, createdAt: at(0.4) })
+    }
+    turn('client', opening, 0)
+    turn('client', 'By modern I mean: same header and type on every page, and no horizontal scrolling at 375px or 1440px.', 3)
+    turn('system', `${sam.name} joined the room.`, 14)
+    turn('freelancer', 'Hi Maya! Menu and hours are quick, and pre-orders for pickup are fine. Card payments at checkout would be another $600; if people pay at pickup I can keep it at $1,500.', 4)
+    turn('client', "Let's leave card payments out for now and keep $1,500. Can we split it into two payments?", 6, (out) =>
+      `Done: card payments are out of scope and the total stays $1,500, in two payments — ${money(out.terms.milestones[0].amount_cents, 'USD', { whole: true })} when the first pages are live, ${money(out.terms.milestones[1].amount_cents, 'USD', { whole: true })} at launch with pickup orders. Each payment has checks the verifier can run. If this reads right, both of you can accept version ${out.terms.version}.`)
+    const v = c.room.terms.version
+    c.room[otherRole === 'client' ? 'clientV' : 'freelancerV'] = v
+    const otherName = (otherRole === 'client' ? maya : sam).name
+    say(c, 'system', `${otherName} accepted version ${v}.`, { version: v, createdAt: at(3) })
+    c.activity = [
+      { id: uid('a'), actor: otherRole, event: 'room.accepted', payload: { version: v }, createdAt: c.room.messages.at(-1).createdAt },
+      { id: uid('a'), actor: 'agent', event: 'room.terms_updated', payload: { version: v }, createdAt: c.room.messages.at(-2).createdAt },
+      { id: uid('a'), actor: 'freelancer', event: 'contract.joined', payload: { name: sam.name }, createdAt: c.room.messages.find((m) => m.author === 'system').createdAt },
+      { id: uid('a'), actor: 'client', event: 'room.opened', payload: { name: maya.name }, createdAt: c.createdAt },
     ]
     db.contracts.unshift(c)
     save()

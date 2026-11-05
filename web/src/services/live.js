@@ -73,6 +73,12 @@ function mapContract(c) {
     client: person(c.client), freelancer: person(c.freelancer),
     clientSignedAt: c.client_signed_at, freelancerSignedAt: c.freelancer_signed_at,
     milestones,
+    room: c.terms ? {
+      terms: c.terms, clientV: c.terms_client_v, freelancerV: c.terms_freelancer_v, busy: !!c.mediator_busy,
+      messages: [...(c.room_messages || [])].sort((a, b) => a.created_at.localeCompare(b.created_at)).map((x) => ({
+        id: x.id, author: x.author, body: x.body, suggestions: x.suggestions || [], changes: x.changes || [], version: x.version, createdAt: x.created_at,
+      })),
+    } : null,
     activity: [...(c.audit_log || [])].sort((a, b) => b.created_at.localeCompare(a.created_at)).map((a) => ({
       id: a.id, actor: a.actor, event: a.event, payload: a.payload || {}, milestoneId: a.milestone_id, createdAt: a.created_at,
     })),
@@ -82,7 +88,8 @@ function mapContract(c) {
 const CONTRACT_SELECT = `
   *, client:profiles!contracts_client_id_fkey(id, display_name, paypal_email),
   freelancer:profiles!contracts_freelancer_id_fkey(id, display_name, paypal_email),
-  milestones(*, criteria(*), appeals(*), disputes(*), submissions(*, verdicts(*, criterion_results(*))))`
+  milestones(*, criteria(*), appeals(*), disputes(*), submissions(*, verdicts(*, criterion_results(*)))),
+  room_messages(*)`
 
 export const live = {
   mode: 'live',
@@ -94,6 +101,7 @@ export const live = {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'verdicts' }, fn)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'appeals' }, fn)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'disputes' }, fn)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_messages' }, fn)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'audit_log' }, fn)
       .subscribe()
     const { data } = supabase.auth.onAuthStateChange(() => fn())
@@ -150,6 +158,12 @@ export const live = {
   previewInvite: (code) => call(`/invites/${encodeURIComponent(code)}`, { method: 'GET' }),
   joinContract: (code) => call('/contracts/join', { body: { code } }),
 
+  // ---- the contract room (terms shaped in conversation with the mediator)
+  openRoom: (payload) => call('/rooms', { body: payload }),
+  sendRoomMessage: (contractId, body) => call(`/contracts/${contractId}/room/messages`, { body: { body } }),
+  askMediator: (contractId) => call(`/contracts/${contractId}/room/ask`),
+  acceptTerms: (contractId, version) => call(`/contracts/${contractId}/room/accept`, { body: { version } }),
+
   // ---- terms
   updateCriteria: (milestoneId, criteria) => call(`/milestones/${milestoneId}/criteria`, { method: 'PUT', body: { criteria } }),
   signTerms: (contractId) => call(`/contracts/${contractId}/sign`),
@@ -170,5 +184,6 @@ export const live = {
   simulateDispute: null,
 
   loadSample: null,
+  loadRoomSample: null,
   reset: null,
 }

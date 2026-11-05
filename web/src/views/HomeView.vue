@@ -102,6 +102,16 @@ const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Go
 
 const code = ref('')
 const loadingSample = ref(false)
+const loadingRoom = ref(false)
+async function sampleRoom() {
+  loadingRoom.value = true
+  try {
+    const { id } = await api.loadRoomSample()
+    router.push(`/contracts/${id}`)
+  } finally {
+    loadingRoom.value = false
+  }
+}
 async function sample() {
   loadingSample.value = true
   try {
@@ -146,6 +156,7 @@ async function sample() {
             <VEmptyState :icon="FileText" title="No contracts yet" sub="Describe the work and set milestones. The agent turns it into checks you both sign, PayPal holds the money, and it moves only when the checks pass.">
               <VButton :icon="Plus" to="/contracts/new">Create a contract</VButton>
               <VButton v-if="isDemo" variant="secondary" :loading="loadingSample" @click="sample">Load a sample contract</VButton>
+              <VButton v-if="isDemo" variant="secondary" :loading="loadingRoom" @click="sampleRoom">Open a sample contract room</VButton>
               <VButton variant="ghost" :icon="KeyRound" to="/join">I have an invite code</VButton>
             </VEmptyState>
           </VNotchCard>
@@ -189,7 +200,8 @@ async function sample() {
                 <h3 class="invite__title">{{ c.title }}</h3>
                 <div class="invite__foot">
                   <VPill tone="accent" size="sm">Invitation</VPill>
-                  <span class="vk-faint">{{ c.milestones.length }} milestones · <span class="vk-num">{{ money(contractTotals(c).total, c.currency, { whole: true }) }}</span></span>
+                  <span v-if="c.status === 'scoping'" class="vk-faint">Contract room · terms in progress</span>
+                  <span v-else class="vk-faint">{{ c.milestones.length }} milestones · <span class="vk-num">{{ money(contractTotals(c).total, c.currency, { whole: true }) }}</span></span>
                 </div>
               </VNotchCard>
             </div>

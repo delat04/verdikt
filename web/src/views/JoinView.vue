@@ -89,10 +89,12 @@ async function join() {
           <dt class="vk-kv__k">{{ i === invite.milestones.length - 1 && invite.milestones.length > 1 ? 'Final' : `M${i + 1}` }} · {{ m.title }}</dt>
           <dd class="vk-kv__v">{{ money(m.amountCents, invite.currency) }}</dd>
         </div>
+        <div v-if="!invite.milestones.length" class="vk-kv__row"><dt class="vk-kv__k">No payments drafted yet</dt><dd class="vk-kv__v">—</dd></div>
         <div class="vk-kv__row inv__total"><dt class="vk-kv__k">Total</dt><dd class="vk-kv__v">{{ money(total, invite.currency) }}</dd></div>
       </dl>
 
-      <p class="inv__note"><ShieldCheck :size="16" :stroke-width="1.9" /> Joining doesn't commit you. You'll review the checks the agent drafted, and nothing moves until you both sign.</p>
+      <p v-if="invite.status === 'scoping'" class="inv__note"><ShieldCheck :size="16" :stroke-width="1.9" /> This is a contract room: the terms above are a draft. You shape them together with Verdikt as mediator, and nothing is agreed until you both accept the same version.</p>
+      <p v-else class="inv__note"><ShieldCheck :size="16" :stroke-width="1.9" /> Joining doesn't commit you. You'll review the checks the agent drafted, and nothing moves until you both sign.</p>
 
       <p v-if="error" class="vk-field__error">{{ error }}</p>
       <VButton v-if="invite.seat" size="lg" block :loading="joining" :icon-right="ArrowRight" @click="join">

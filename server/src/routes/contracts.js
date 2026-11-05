@@ -5,11 +5,12 @@
 import { db, audit } from '../lib/supabase.js'
 import { requireUser, milestoneFor } from '../lib/auth.js'
 import { draftCriteria, fallbackCriteria } from '../agent/draft.js'
+import { mediateSoon } from '../agent/mediator.js'
 
 const MAX_MILESTONES = 6
 const KINDS = ['visual', 'functional', 'code', 'performance', 'content']
 
-async function draftInBackground(contract, milestones) {
+export async function draftInBackground(contract, milestones) {
   let drafted
   try {
     drafted = await draftCriteria({ title: contract.title, brief: contract.brief, milestones })
@@ -31,10 +32,13 @@ function invitePreview(c) {
     id: c.id, title: c.title, brief: c.brief, currency: c.currency,
     seat: !c.client_id ? 'client' : !c.freelancer_id ? 'freelancer' : null,
     inviter: inviter && { id: inviter.id, name: inviter.display_name },
-    milestones: [...c.milestones].sort((a, b) => a.position - b.position).map((m) => ({ title: m.title, amountCents: m.amount_cents })),
+    status: c.status,
+    milestones: c.status === 'scoping'
+      ? (c.terms?.milestones || []).map((m) => ({ title: m.title, amountCents: m.amount_cents }))
+      : [...c.milestones].sort((a, b) => a.position - b.position).map((m) => ({ title: m.title, amountCents: m.amount_cents })),
   }
 }
-const PREVIEW_SELECT = 'id, title, brief, currency, client_id, freelancer_id, invite_code, invite_email, client:profiles!contracts_client_id_fkey(id, display_name), freelancer:profiles!contracts_freelancer_id_fkey(id, display_name), milestones(title, amount_cents, position)'
+const PREVIEW_SELECT = 'id, title, brief, currency, status, terms, client_id, freelancer_id, invite_code, invite_email, client:profiles!contracts_client_id_fkey(id, display_name), freelancer:profiles!contracts_freelancer_id_fkey(id, display_name), milestones(title, amount_cents, position)'
 
 // ---- public: what an invite link shows before you sign in
 export async function inviteRoutes(app) {
@@ -55,7 +59,7 @@ export default async function contractRoutes(app) {
     return {
       invites: (data || []).filter((c) => c.client_id !== me && c.freelancer_id !== me).map((c) => ({
         ...invitePreview(c), inviteCode: c.invite_code, client: c.client && { name: c.client.display_name }, freelancer: c.freelancer && { name: c.freelancer.display_name },
-        milestones: [...c.milestones].map((m) => ({ title: m.title, amountCents: m.amount_cents, status: 'draft' })),
+        milestones: invitePreview(c).milestones.map((m) => ({ ...m, status: 'draft' })),
       })),
     }
   })
@@ -106,6 +110,10 @@ export default async function contractRoutes(app) {
     await db().from('contracts').update({ [seat]: me }).eq('id', c.id)
     const { data: p } = await db().from('profiles').select('display_name').eq('id', me).single()
     await audit({ contractId: c.id, actor: seat === 'client_id' ? 'client' : 'freelancer', event: 'contract.joined', payload: { name: p?.display_name } })
+    if (c.status === 'scoping') {
+      await db().from('room_messages').insert({ contract_id: c.id, author: 'system', body: `${p?.display_name || 'They'} joined the room.` })
+      mediateSoon(c.id)
+    }
     return { id: c.id }
   })
 

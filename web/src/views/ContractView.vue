@@ -11,7 +11,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { PenLine, Wallet, FileWarning, Undo2, Scale, Check, X, ArrowLeft, Clock3, RefreshCw, Settings, CalendarClock } from 'lucide-vue-next'
+import { PenLine, Wallet, FileWarning, Undo2, Scale, Check, X, ArrowLeft, Clock3, RefreshCw, Settings, CalendarClock, MessagesSquare } from 'lucide-vue-next'
 import VSegmented from '@/components/ui/VSegmented.vue'
 import AppShell from '@/layouts/AppShell.vue'
 import VButton from '@/components/ui/VButton.vue'
@@ -31,6 +31,7 @@ import VerdictReport from '@/components/VerdictReport.vue'
 import SubmitWork from '@/components/SubmitWork.vue'
 import FundModal from '@/components/FundModal.vue'
 import ActivityFeed from '@/components/ActivityFeed.vue'
+import ContractRoom from '@/components/ContractRoom.vue'
 import { ACTION } from '@/components/actionMeta'
 import { useLive } from '@/composables/useLive'
 import { useSplitScroll } from '@/composables/useSplitScroll'
@@ -56,6 +57,11 @@ const totals = computed(() => contract.value ? contractTotals(contract.value) : 
 const signed = computed(() => contract.value && termsSigned(contract.value))
 const current = computed(() => contract.value && currentMilestone(contract.value))
 const drafting = computed(() => contract.value?.status === 'drafting')
+const scoping = computed(() => contract.value?.status === 'scoping')
+// the room locks into milestones: say so once, as the page turns into the contract
+watch(() => contract.value?.status, (now, was) => {
+  if (was === 'scoping' && now && now !== 'scoping') toast('Terms locked — the agent is turning each payment into checks', { tone: 'ok' })
+})
 
 // ---- the split page: fixed head, columns that scroll on their own
 const { root, scrolled, condensed, reveal } = useSplitScroll()
@@ -64,7 +70,7 @@ const msCard = ref(null)
 // ---- selected milestone + tab
 const selectedId = ref(null)
 watch(contract, (c) => {
-  if (!c) return
+  if (!c?.milestones.length) return   // a contract room has no milestones until its terms lock
   if (!selectedId.value || !c.milestones.some((m) => m.id === selectedId.value)) {
     selectedId.value = (currentMilestone(c) || c.milestones[c.milestones.length - 1]).id
   }
@@ -219,6 +225,8 @@ const canSubmit = computed(() => role.value === 'freelancer' && ms.value && curr
         </VEmptyState>
       </VCard>
     </div>
+
+    <ContractRoom v-else-if="contract && scoping" :contract="contract" :role="role" :other="other" />
 
     <div v-else-if="contract" ref="root" class="vk-split" :class="{ 'is-scrolled': scrolled, 'is-condensed': condensed }">
       <header class="vk-split__head">
@@ -477,6 +485,11 @@ const canSubmit = computed(() => role.value === 'freelancer' && ms.value && curr
                 <VButton v-else size="sm" variant="secondary" @click="modal = 'invite'">Invite</VButton>
               </li>
             </ul>
+            <!-- where these terms came from, when they were agreed in a room -->
+            <div v-if="contract.room?.messages?.length" class="origin">
+              <p class="origin__text">Agreed in the contract room · version <span class="vk-num">{{ contract.room.terms.version }}</span> · {{ contract.room.messages.filter((m) => m.author === 'client' || m.author === 'freelancer').length }} messages</p>
+              <VButton size="sm" variant="ghost" :icon="MessagesSquare" @click="modal = 'room'">Read</VButton>
+            </div>
           </VCard>
 
           <VCard title="Ledger" sub="Every signature, PayPal event and agent decision.">
@@ -494,6 +507,15 @@ const canSubmit = computed(() => role.value === 'freelancer' && ms.value && curr
           <VCopy :value="inviteLink" label="Copy link" />
           <p v-if="contract.inviteEmail" class="vk-faint invite__note">{{ contract.inviteEmail }} also sees it as an invitation when they sign in.</p>
         </div>
+      </VModal>
+
+      <VModal :open="modal === 'room'" title="How these terms were agreed" :sub="`The contract room, as it was when both of you accepted version ${contract.room?.terms.version}.`" @close="modal = ''">
+        <ol class="transcript">
+          <li v-for="m in contract.room?.messages || []" :key="m.id" :class="`is-${m.author}`">
+            <span class="transcript__who">{{ m.author === 'agent' ? 'Verdikt' : m.author === 'system' ? '' : contract[m.author]?.name || m.author }}<span class="vk-faint"> {{ shortDate(m.createdAt) }}</span></span>
+            <span class="transcript__text">{{ m.body || (m.changes || []).join(' · ') }}</span>
+          </li>
+        </ol>
       </VModal>
 
       <VModal :open="modal === 'sign'" title="Sign the terms" sub="Your signature covers every milestone below." @close="modal = ''">
@@ -678,6 +700,15 @@ const canSubmit = computed(() => role.value === 'freelancer' && ms.value && curr
 .parties__name { font: 400 13px/18px var(--vk-font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .parties__role { font: var(--vk-type-small); color: var(--vk-faint); }
 
+.origin { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--vk-line-subtle); }
+.origin__text { margin: 0; font: var(--vk-type-small); color: var(--vk-muted); }
+.transcript { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px; max-height: 60vh; overflow-y: auto; }
+.transcript li { display: flex; flex-direction: column; gap: 2px; }
+.transcript__who { font: var(--vk-type-small); color: var(--vk-ink-2); }
+.transcript__text { font: var(--vk-type-dense); color: var(--vk-ink); white-space: pre-wrap; }
+.transcript .is-system { align-items: center; }
+.transcript .is-system .transcript__text { font: var(--vk-type-small); color: var(--vk-muted); }
+.transcript .is-agent .transcript__text { color: var(--vk-ink-2); }
 .invite__code { margin: 6px 0 0; font-size: 26px; letter-spacing: .14em; }
 .invite__note { margin: 16px 0 0; font: var(--vk-type-small); }
 .sign { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
