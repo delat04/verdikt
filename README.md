@@ -6,6 +6,8 @@ Freelancers get stiffed. Clients pay for work that isn't done. **Verdikt** turns
 
 > Built for the PayPal "Build What's Next with PayPal and AI" hackathon. Everything runs on the **PayPal sandbox** — no real money moves.
 
+**Try it live: [verdikt-leg2.onrender.com](https://verdikt-leg2.onrender.com)** — *Try it now* plays both sides in your browser with no account ([straight into the demo](https://verdikt-leg2.onrender.com/login?demo)); sign in with your email for real PayPal sandbox escrow and the Claude agents.
+
 ## The flow
 
 1. **Onboarding** — name, which side you're on, where payouts land (PayPal email).
