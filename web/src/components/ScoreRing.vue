@@ -1,36 +1,42 @@
+<!-- ScoreRing — verdict confidence / checks passed. Green only when it passes the threshold. -->
 <script setup>
 import { computed } from 'vue'
 
-/* Verdict confidence ring — adapted from run-arrands' AiScoreRing */
 const props = defineProps({
-  score: { type: Number, default: 0 },      // 0–100
-  size: { type: Number, default: 80 },
-  threshold: { type: Number, default: 85 },
+  value: { type: Number, default: 0 },      // 0–100
+  size: { type: Number, default: 88 },
+  stroke: { type: Number, default: 6 },
+  pass: { type: Boolean, default: null },   // force the tone; default: value >= threshold
+  threshold: { type: Number, default: 100 },
+  label: { type: String, default: '' },     // replaces the % in the middle
+  pending: { type: Boolean, default: false }, // still running: accent, not a verdict colour
 })
 
-const radius = computed(() => (props.size - 8) / 2)
-const circumference = computed(() => 2 * Math.PI * radius.value)
-const offset = computed(() => circumference.value - (props.score / 100) * circumference.value)
-const color = computed(() => (props.score >= props.threshold ? 'var(--ok)' : 'var(--warn)'))
+const r = computed(() => (props.size - props.stroke - 2) / 2)
+const c = computed(() => 2 * Math.PI * r.value)
+const offset = computed(() => c.value - (Math.min(100, Math.max(0, props.value)) / 100) * c.value)
+const ok = computed(() => (props.pass ?? props.value >= props.threshold))
 </script>
 
 <template>
-  <div class="ring" :style="{ width: size + 'px', height: size + 'px' }">
-    <svg :width="size" :height="size" :viewBox="`0 0 ${size} ${size}`">
-      <circle :cx="size / 2" :cy="size / 2" :r="radius" fill="none" stroke="var(--line)" stroke-width="6" />
+  <div class="score" :class="{ 'is-ok': ok && !pending, 'is-pending': pending }" :style="{ width: `${size}px`, height: `${size}px` }">
+    <svg :width="size" :height="size" :viewBox="`0 0 ${size} ${size}`" aria-hidden="true">
+      <circle :cx="size / 2" :cy="size / 2" :r="r" fill="none" class="score__track" :stroke-width="stroke" />
       <circle
-        :cx="size / 2" :cy="size / 2" :r="radius"
-        fill="none" :stroke="color" stroke-width="6" stroke-linecap="round"
-        :stroke-dasharray="circumference" :stroke-dashoffset="offset"
-        class="ring__bar"
+        :cx="size / 2" :cy="size / 2" :r="r" fill="none" class="score__bar" :stroke-width="stroke"
+        stroke-linecap="round" :stroke-dasharray="c" :stroke-dashoffset="offset"
       />
     </svg>
-    <span class="ring__label num" :style="{ color }">{{ score }}%</span>
+    <span class="score__label vk-num">{{ label || `${Math.round(value)}%` }}</span>
   </div>
 </template>
 
 <style scoped>
-.ring { position: relative; display: inline-flex; align-items: center; justify-content: center; }
-.ring__bar { transform: rotate(-90deg); transform-origin: 50% 50%; transition: stroke-dashoffset 0.6s ease; }
-.ring__label { position: absolute; font-weight: 600; font-size: 0.9375rem; }
+.score { position: relative; display: inline-grid; place-items: center; flex: none; }
+.score svg { position: absolute; inset: 0; }
+.score__track { stroke: var(--vk-line); }
+.score__bar { stroke: var(--vk-danger); transform: rotate(-90deg); transform-origin: 50% 50%; transition: stroke-dashoffset .7s var(--vk-ease-out), stroke .3s; }
+.score.is-ok .score__bar { stroke: var(--vk-ok); }
+.score.is-pending .score__bar { stroke: var(--vk-accent); }
+.score__label { position: relative; font-size: 15px; font-weight: 400; color: var(--vk-ink); }
 </style>

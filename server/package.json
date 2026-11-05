@@ -7,13 +7,20 @@
     "node": ">=22.9"
   },
   "scripts": {
-    "dev": "node --env-file-if-exists=.env --watch src/index.js",
+    "setup": "node scripts/setup.js",
+    "db:migrate": "node --env-file-if-exists=.env scripts/migrate.js",
+    "dev": "node --env-file-if-exists=.env --watch-path=src src/index.js",
     "start": "node --env-file-if-exists=.env src/index.js",
     "paypal:smoke": "node --env-file-if-exists=.env scripts/paypal-smoke.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.5.0",
     "@fastify/cors": "^11.4.0",
     "@supabase/supabase-js": "^2.119.0",
-    "fastify": "^5.12.8"
+    "fastify": "^5.12.8",
+    "playwright-core": "^1.64.1"
+  },
+  "devDependencies": {
+    "pg": "^8.13.1"
   }
 }

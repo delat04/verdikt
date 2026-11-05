@@ -100,11 +100,15 @@ export function getAuthorization(authorizationId) {
   return call('GET', `/v2/payments/authorizations/${authorizationId}`)
 }
 
-/** Release: move held funds to the merchant. */
-export function captureAuthorization(authorizationId, { requestId, noteToPayer } = {}) {
+/**
+ * Release: move held funds to the platform. With `amountCents` below the hold it's a partial release —
+ * final_capture tells PayPal no more captures follow, so the rest of the hold goes back to the client.
+ */
+export function captureAuthorization(authorizationId, { requestId, noteToPayer, amountCents, currency = 'USD' } = {}) {
   return call('POST', `/v2/payments/authorizations/${authorizationId}/capture`, {
     final_capture: true,
     note_to_payer: noteToPayer?.slice(0, 255),
+    ...(amountCents ? { amount: { currency_code: currency, value: centsToValue(amountCents) } } : {}),
   }, { requestId })
 }
 
@@ -117,6 +121,60 @@ export function voidAuthorization(authorizationId, { requestId } = {}) {
 export function reauthorize(authorizationId, { requestId } = {}) {
   return call('POST', `/v2/payments/authorizations/${authorizationId}/reauthorize`, {}, { requestId })
 }
+
+// ---- Payouts: the platform pays the freelancer once a release is captured ----
+/** One payout per release. PayPal refuses a reused sender_batch_id, which makes retries safe. */
+export function createPayout({ senderBatchId, email, amountCents, currency = 'USD', note, subject, itemId }) {
+  return call('POST', '/v1/payments/payouts', {
+    sender_batch_header: { sender_batch_id: senderBatchId, email_subject: subject, email_message: note },
+    items: [{
+      recipient_type: 'EMAIL',
+      receiver: email,
+      amount: { value: centsToValue(amountCents), currency },
+      note: note?.slice(0, 4000),
+      sender_item_id: itemId,
+    }],
+  }, { requestId: senderBatchId })
+}
+
+export function getPayout(batchId) {
+  return call('GET', `/v1/payments/payouts/${batchId}`)
+}
+
+// ---- Disputes (the agent reads them through PayPal's MCP server; answers go through REST) ----
+export function listDisputes({ startTime } = {}) {
+  const qs = new URLSearchParams({ page_size: '50', ...(startTime ? { start_time: startTime } : {}) })
+  return call('GET', `/v1/customer/disputes?${qs}`)
+}
+
+export function getDispute(disputeId) {
+  return call('GET', `/v1/customer/disputes/${disputeId}`)
+}
+
+/** Seller's evidence for a dispute — multipart, with the JSON in an `input` part. */
+export async function provideEvidence(disputeId, { notes, type = 'OTHER' }) {
+  const form = new FormData()
+  const input = { evidences: [{ evidence_type: type, notes: notes.slice(0, 2000) }] }
+  form.append('input', new Blob([JSON.stringify(input)], { type: 'application/json' }), 'input.json')
+  const res = await fetch(`${BASE}/v1/customer/disputes/${disputeId}/provide-evidence`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${await accessToken()}`, 'PayPal-Request-Id': `evidence-${disputeId}` },
+    body: form,
+  })
+  const text = await res.text()
+  const json = text ? JSON.parse(text) : {}
+  if (!res.ok) throw new PayPalError(res.status, json)
+  return json
+}
+
+/** A message on the dispute — works while it is still an inquiry, when evidence isn't accepted yet. */
+export function sendDisputeMessage(disputeId, message) {
+  return call('POST', `/v1/customer/disputes/${disputeId}/send-message`, { message: message.slice(0, 2000) }, { requestId: `message-${disputeId}` })
+}
+
+/** A short-lived access token, for handing PayPal's MCP server to the agent. */
+export const mcpToken = () => accessToken()
+export const sandbox = BASE.includes('sandbox')
 
 // ---- Webhooks ----
 export async function verifyWebhook(headers, event) {

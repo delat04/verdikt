@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verdikt — connect your keys</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400&family=JetBrains+Mono:wght@400&display=swap">
+<style>
+  /* Verdikt DS, inlined: near-white canvas, white cards, 1px lines, cobalt for the one action, weight 400 only */
+  :root {
+    --canvas: #F7F8FA; --surface: #FFFFFF; --surface-2: #F1F3F6; --ink: #0E0F12; --ink-2: #2B2E35; --muted: #4B505B; --faint: #656B79;
+    --line: #D9DCE2; --line-strong: #BCC1CA; --accent: #315EFB; --accent-hover: #2448D8; --accent-soft: #EEF2FF; --accent-text: #2448D8;
+    --ok: #12B76A; --ok-ink: #0B7A47; --ok-soft: #E7F8EF; --warn-ink: #8A5600; --warn-soft: #FEF4E2; --danger: #E5484D; --danger-ink: #A3292D; --danger-soft: #FDECEC;
+    --focus: rgba(49, 94, 251, .18);
+    --font: 'Inter Tight', system-ui, -apple-system, 'Segoe UI', sans-serif; --mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) { :root {
+    --canvas: #060607; --surface: #111214; --surface-2: #18191C; --ink: #F2F3F5; --ink-2: #D6D8DE; --muted: #A9ADB7; --faint: #868B97;
+    --line: #2C2E34; --line-strong: #40434B; --accent: #3560FA; --accent-hover: #4C74FF; --accent-soft: rgba(53,96,250,.18); --accent-text: #9DB2FF;
+    --ok: #3BE37A; --ok-ink: #5BEA8F; --ok-soft: rgba(59,227,122,.12); --warn-ink: #FCD34D; --warn-soft: rgba(251,191,36,.12); --danger: #F87171; --danger-ink: #FCA5A5; --danger-soft: rgba(248,113,113,.12);
+    --focus: rgba(106, 139, 255, .28); color-scheme: dark;
+  } }
+  * { box-sizing: border-box; font-weight: 400; }
+  body { margin: 0; background: var(--canvas); color: var(--ink); font: 400 14px/21px var(--font); -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 680px; margin: 0 auto; padding: 48px 20px 80px; display: flex; flex-direction: column; gap: 16px; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; font: 400 18px/1 var(--font); letter-spacing: -.03em; }
+  h1 { margin: 22px 0 0; font: 400 40px/1.05 var(--font); letter-spacing: -.04em; }
+  .lede { margin: 12px 0 8px; max-width: 58ch; color: var(--muted); font-size: 15px; line-height: 23px; }
+  .lede code, .hint code { font: 400 12.5px var(--mono); padding: 1px 6px; border-radius: 6px; background: var(--surface-2); color: var(--ink-2); }
+
+  .card { display: flex; flex-direction: column; gap: 18px; padding: 24px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); }
+  .card__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .card__title { margin: 0; font: 400 18px/24px var(--font); letter-spacing: -.01em; }
+  .card__sub { margin: 3px 0 0; color: var(--muted); font-size: 13px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; flex: none; height: 24px; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
+  .pill.is-set { color: var(--ok-ink); background: var(--ok-soft); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
+  .pill.is-set::before { background: var(--ok); }
+  .pill.is-need { color: var(--accent-text); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+  .pill.is-need::before { background: var(--accent); }
+
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  label { font-size: 13px; color: var(--ink); }
+  label small { margin-left: 6px; font-size: 12px; color: var(--faint); }
+  .hint { font-size: 12px; line-height: 17px; color: var(--muted); }
+  .control { position: relative; display: flex; }
+  input {
+    width: 100%; height: 42px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 10px;
+    background: var(--surface); color: var(--ink); font: 400 13px var(--mono); outline: none;
+    transition: border-color .16s, box-shadow .16s;
+  }
+  input::placeholder { color: var(--faint); font-family: var(--font); }
+  input:hover { border-color: var(--faint); }
+  input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--focus); }
+  input[aria-invalid='true'] { border-color: var(--danger); }
+  .control input { padding-right: 70px; }
+  .reveal { position: absolute; right: 6px; top: 6px; height: 30px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--surface-2); color: var(--muted); font: 400 12px var(--font); cursor: pointer; }
+  .reveal:hover { color: var(--ink); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+  .actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 4px 0; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; height: 46px; padding: 0 22px; border: 1px solid transparent; border-radius: 999px; font: 400 15px/1 var(--font); cursor: pointer; transition: background .16s, border-color .16s; }
+  .btn--primary { background: var(--accent); color: #fff; }
+  .btn--primary:hover:not(:disabled) { background: var(--accent-hover); }
+  .btn--secondary { height: 38px; padding: 0 16px; background: var(--surface); border-color: var(--line); color: var(--ink); font-size: 14px; }
+  .btn--secondary:hover { border-color: var(--line-strong); }
+  .btn:disabled { opacity: .5; cursor: progress; }
+  :is(button, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .status { color: var(--muted); font-size: 13px; }
+
+  .results { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  .result { display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; }
+  .result::before { content: ''; width: 8px; height: 8px; margin-top: 7px; border-radius: 50%; background: var(--faint); }
+  .result.is-ok::before { background: var(--ok); }
+  .result.is-bad::before { background: var(--danger); }
+  .result.is-warn::before { background: #D98A04; }
+  .result b { display: block; color: var(--ink); }
+  .result span { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .next { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; color: var(--ink-2); }
+  .next li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; }
+  .next .n { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line); font: 400 11px var(--mono); color: var(--muted); }
+  pre { margin: 6px 0 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); font: 400 12.5px/1.7 var(--mono); color: var(--ink); overflow-x: auto; }
+  .leak { margin: 0; padding: 14px 16px; border-radius: 14px; background: var(--danger-soft); color: var(--danger-ink); font-size: 13px; line-height: 19px; }
+  .foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; color: var(--faint); font-size: 12px; }
+  [hidden] { display: none !important; }
+  @media (max-width: 560px) { .row { grid-template-columns: 1fr; } h1 { font-size: 32px; } .card { padding: 18px; } }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <span class="brand">
+      <svg width="26" height="26" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M10 14 L32 54 L54 14" stroke="currentColor" stroke-width="4.5" stroke-linejoin="round" stroke-linecap="round"/><path d="M21 14 L32 34 L43 14" stroke="var(--accent)" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/></svg>
+      Verdikt
+    </span>
+    <h1>Connect your keys</h1>
+    <p id="leak" class="leak" role="alert" hidden></p>
+    <p class="lede">Paste each key once. It's checked with its own service, then written to <code>server/.env</code> and <code>web/.env</code> on this computer — nowhere else. Leave a field empty to keep what's already saved.</p>
+  </header>
+
+  <form id="form" class="wrap" style="padding: 0; gap: 16px" autocomplete="off" novalidate>
+    <!-- PayPal -->
+    <section class="card" aria-labelledby="pp">
+      <div class="card__head">
+        <div>
+          <h2 id="pp" class="card__title">PayPal sandbox</h2>
+          <p class="card__sub">Holds, releases and refunds the escrow. Test money only.</p>
+        </div>
+        <span id="pp-pill" class="pill is-need">Needed</span>
+      </div>
+      <div class="field">
+        <label for="pp-id">Client ID</label>
+        <input id="pp-id" name="paypalClientId" spellcheck="false" placeholder="From Apps &amp; Credentials → Sandbox → your app">
+        <span id="pp-id-hint" class="hint">Also goes to the web app — it's the public half.</span>
+      </div>
+      <div class="field">
+        <label for="pp-secret">Secret</label>
+        <div class="control">
+          <input id="pp-secret" name="paypalSecret" type="password" spellcheck="false" placeholder="Shown under the Client ID">
+          <button type="button" class="reveal" data-for="pp-secret">Show</button>
+        </div>
+        <span class="hint">Stays on the server. Live keys won't pass the sandbox check.</span>
+      </div>
+    </section>
+
+    <!-- Supabase -->
+    <section class="card" aria-labelledby="sb">
+      <div class="card__head">
+        <div>
+          <h2 id="sb" class="card__title">Supabase <small style="color: var(--faint); font-size: 13px">· optional</small></h2>
+          <p class="card__sub">Accounts and data. Filling all three switches the app from demo to live — run the two SQL migrations first.</p>
+        </div>
+        <span id="sb-pill" class="pill">Not set</span>
+      </div>
+      <div class="field">
+        <label for="sb-url">Project URL</label>
+        <input id="sb-url" name="supabaseUrl" spellcheck="false" placeholder="https://abcd1234.supabase.co">
+      </div>
+      <div class="row">
+        <div class="field">
+          <label for="sb-anon">anon public key <small>web app</small></label>
+          <div class="control">
+            <input id="sb-anon" name="supabaseAnonKey" type="password" spellcheck="false" placeholder="Project Settings → API">
+            <button type="button" class="reveal" data-for="sb-anon">Show</button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="sb-service">service_role key <small>server only</small></label>
+          <div class="control">
+            <input id="sb-service" name="supabaseServiceKey" type="password" spellcheck="false" placeholder="Never shared with the browser">
+            <button type="button" class="reveal" data-for="sb-service">Show</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Anthropic -->
+    <section class="card" aria-labelledby="an">
+      <div class="card__head">
+        <div>
+          <h2 id="an" class="card__title">Claude <small style="color: var(--faint); font-size: 13px">· optional</small></h2>
+          <p class="card__sub">Drafts the checks from the brief and judges each delivery.</p>
+        </div>
+        <span id="an-pill" class="pill">Not set</span>
+      </div>
+      <div class="field">
+        <label for="an-key">Anthropic API key</label>
+        <div class="control">
+          <input id="an-key" name="anthropicKey" type="password" spellcheck="false" placeholder="console.anthropic.com → API keys">
+          <button type="button" class="reveal" data-for="an-key">Show</button>
+        </div>
+      </div>
+    </section>
+
+    <div class="actions">
+      <button id="save" class="btn btn--primary" type="submit">Check &amp; save</button>
+      <span id="status" class="status" role="status" aria-live="polite"></span>
+    </div>
+  </form>
+
+  <section id="results-card" class="card" aria-labelledby="res" hidden>
+    <h2 id="res" class="card__title">What happened</h2>
+    <ul id="results" class="results"></ul>
+    <div id="next" hidden>
+      <p class="card__sub" style="margin: 4px 0 12px; color: var(--ink)">Next</p>
+      <ol class="next">
+        <li><span class="n">1</span><div>Prove the money flow end to end (approve with the test buyer when the link opens):<pre>cd server
+npm run paypal:smoke</pre></div></li>
+        <li><span class="n">2</span><div>Restart <code style="font: 400 12.5px var(--mono)">npm run dev</code> in <b>server</b> and <b>web</b> so they pick up the new values.</div></li>
+      </ol>
+    </div>
+  </section>
+
+  <div class="foot">
+    <span id="where">Running on this computer only.</span>
+    <button id="done" class="btn btn--secondary" type="button">Finish &amp; close</button>
+  </div>
+</main>
+
+<script>
+  const TOKEN = '__TOKEN__'
+  const $ = (id) => document.getElementById(id)
+  const call = (path, body) => fetch(path, {
+    method: body ? 'POST' : 'GET',
+    headers: { 'X-Setup-Token': TOKEN, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  }).then((r) => r.json())
+
+  // show / hide a secret
+  document.querySelectorAll('.reveal').forEach((b) => b.addEventListener('click', () => {
+    const input = $(b.dataset.for)
+    const show = input.type === 'password'
+    input.type = show ? 'text' : 'password'
+    b.textContent = show ? 'Hide' : 'Show'
+  }))
+
+  function pill(el, set, needed) {
+    el.className = 'pill' + (set ? ' is-set' : needed ? ' is-need' : '')
+    el.textContent = set ? 'Saved' : needed ? 'Needed' : 'Not set'
+  }
+  function hint(input, text) { if (text) input.placeholder = text }
+
+  async function refresh() {
+    const s = await call('/state')
+    pill($('pp-pill'), s.paypal.clientId && s.paypal.secret, true)
+    pill($('sb-pill'), s.supabase.url && s.supabase.anon && s.supabase.service, false)
+    pill($('an-pill'), s.anthropic, false)
+    hint($('pp-id'), s.paypal.clientId && `Saved · ends in ${s.paypal.clientId}`)
+    hint($('pp-secret'), s.paypal.secret && 'Saved — leave empty to keep it')
+    hint($('sb-url'), s.supabase.url && `Saved · ${s.supabase.url}`)
+    hint($('sb-anon'), s.supabase.anon && 'Saved — leave empty to keep it')
+    hint($('sb-service'), s.supabase.service && 'Saved — leave empty to keep it')
+    hint($('an-key'), s.anthropic && 'Saved — leave empty to keep it')
+    $('leak').hidden = !s.leaks.length
+    $('leak').textContent = s.leaks.length ? `${s.leaks.join(' and ')} has a secret in it. That file is committed to git, so the key would be published with the code — move it into the matching .env file and leave the example blank.` : ''
+  }
+
+  $('form').addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const body = Object.fromEntries(new FormData($('form')))
+    for (const k in body) body[k] = body[k].trim()
+    if (!Object.values(body).some(Boolean)) { $('status').textContent = 'Paste at least one key first.'; return }
+    $('save').disabled = true
+    $('status').textContent = 'Checking with each service…'
+    try {
+      const out = await call('/save', body)
+      if (out.error) throw new Error(out.error)
+      $('results').innerHTML = ''
+      for (const r of out.results) {
+        const li = document.createElement('li')
+        li.className = 'result ' + (r.ok ? 'is-ok' : r.saved ? 'is-warn' : 'is-bad')
+        const b = document.createElement('b'); b.textContent = r.service
+        const span = document.createElement('span'); span.textContent = r.message
+        li.append(b, span); $('results').append(li)
+      }
+      $('results-card').hidden = false
+      $('next').hidden = !out.results.some((r) => r.service.startsWith('PayPal') && r.saved)
+      $('status').textContent = out.written.length ? `Saved to ${out.written.join(' and ')}.` : 'Nothing was saved.'
+      // a saved secret shouldn't sit in the page
+      document.querySelectorAll('input').forEach((i) => { if (out.saved.includes(i.name)) i.value = '' })
+      await refresh()
+      $('results-card').scrollIntoView({ behavior: 'smooth', block: 'start' })
+    } catch (err) {
+      $('status').textContent = `Couldn't save: ${err.message}`
+    } finally {
+      $('save').disabled = false
+    }
+  })
+
+  $('done').addEventListener('click', async () => {
+    await call('/done', {}).catch(() => {})
+    document.querySelector('main').innerHTML = '<header><h1>All set.</h1><p class="lede">The setup page has stopped. You can close this tab.</p></header>'
+  })
+
+  refresh().catch(() => { $('status').textContent = 'Lost contact with the setup script — run npm run setup again.' })
+</script>
+</body>
+</html>

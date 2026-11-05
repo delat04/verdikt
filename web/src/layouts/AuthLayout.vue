@@ -1,50 +1,50 @@
+<!-- AuthLayout — sign-in, onboarding, invites: one focused panel over the thumbnail's line art. -->
 <script setup>
 import BrandMark from '@/components/BrandMark.vue'
+
+defineProps({ wide: { type: Boolean, default: false } })
 </script>
 
 <template>
   <div class="auth">
-    <div class="auth__glow" />
+    <div class="auth__glow" aria-hidden="true" />
     <svg class="auth__lines" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">
       <path d="M0 1000 A900 900 0 0 1 900 100" />
-      <line x1="0" y1="80" x2="1000" y2="80" />
-      <line x1="80" y1="0" x2="80" y2="1000" />
+      <line x1="0" y1="64" x2="1000" y2="64" />
+      <line x1="64" y1="0" x2="64" y2="1000" />
+      <line x1="936" y1="0" x2="936" y2="1000" />
     </svg>
 
-    <div class="auth__panel">
-      <div class="auth__brand">
-        <BrandMark :size="34" />
-        <span>Verdikt</span>
-      </div>
-      <slot />
-    </div>
+    <header class="auth__top">
+      <RouterLink to="/" class="auth__brand"><BrandMark :size="28" /> Verdikt</RouterLink>
+      <slot name="top" />
+    </header>
 
-    <p class="auth__foot eyebrow">Escrow · Verify · Release</p>
+    <main class="auth__panel" :class="{ 'is-wide': wide }">
+      <slot />
+    </main>
+
+    <p class="auth__foot vk-eyebrow">Escrow · Verify · Release</p>
   </div>
 </template>
 
 <style scoped>
-.auth {
-  position: relative; min-height: 100dvh; overflow: hidden;
-  display: grid; place-items: center; padding: 1.5rem 1rem;
-  background: var(--bg-2);
-}
+.auth { position: relative; min-height: 100dvh; overflow: hidden; display: flex; flex-direction: column; align-items: center; padding: 0 16px 64px; background: var(--vk-canvas); }
 .auth__glow {
-  position: absolute; left: 50%; bottom: -45%; width: 1100px; height: 800px; transform: translateX(-50%);
-  background: radial-gradient(ellipse 45% 35% at 50% 55%, rgba(200, 215, 255, 0.35), rgba(47, 91, 255, 0.25) 45%, transparent 75%);
-  filter: blur(20px); pointer-events: none;
+  position: absolute; left: 50%; bottom: -55%; width: 1200px; height: 820px; transform: translateX(-50%);
+  background: radial-gradient(ellipse 45% 35% at 50% 55%, color-mix(in srgb, var(--vk-accent) 22%, transparent), transparent 72%);
+  filter: blur(24px); pointer-events: none;
 }
 .auth__lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.auth__lines * { fill: none; stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
-
+.auth__lines * { fill: none; stroke: var(--vk-line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.auth__top { position: relative; width: 100%; max-width: 1080px; display: flex; align-items: center; justify-content: space-between; height: 72px; }
+.auth__brand { display: inline-flex; align-items: center; gap: 10px; color: var(--vk-ink); font: 400 18px/1 var(--vk-font); letter-spacing: -.03em; text-decoration: none !important; }
 .auth__panel {
-  position: relative; width: 100%; max-width: 400px;
-  padding: 2rem; border-radius: 20px;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow-pop);
-  backdrop-filter: blur(12px);
+  position: relative; width: 100%; max-width: 440px; margin-top: clamp(16px, 8vh, 72px);
+  padding: 32px; border-radius: var(--vk-r-lg);
+  background: var(--vk-surface); border: 1px solid var(--vk-line); box-shadow: var(--vk-elev-pop);
 }
-.auth__brand { display: flex; align-items: center; gap: 0.625rem; margin-bottom: 1.75rem; font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; }
-.auth__foot { position: absolute; bottom: 1.5rem; left: 0; right: 0; text-align: center; letter-spacing: 0.4em; }
+.auth__panel.is-wide { max-width: 600px; }
+.auth__foot { position: absolute; bottom: 24px; left: 0; right: 0; text-align: center; letter-spacing: .4em; }
+@media (max-width: 520px) { .auth__panel { padding: 24px 20px; } }
 </style>

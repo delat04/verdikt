@@ -1,22 +1,33 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { isConfigured } from '@/lib/supabase'
 
 const routes = [
-  { path: '/', redirect: '/contracts' },
+  { path: '/', component: () => import('@/views/LandingView.vue'), meta: { public: true } },
+  { path: '/design', component: () => import('@/views/DesignSystemView.vue'), meta: { public: true } },
   { path: '/login', component: () => import('@/views/LoginView.vue'), meta: { guest: true } },
-  { path: '/auth/callback', component: () => import('@/views/AuthCallbackView.vue'), meta: { guest: true } },
-  { path: '/setup', component: () => import('@/views/SetupView.vue'), meta: { guest: true } },
-  { path: '/contracts', component: () => import('@/views/DashboardView.vue') },
+  { path: '/auth/callback', component: () => import('@/views/AuthCallbackView.vue'), meta: { public: true } },
+  { path: '/join/:code?', component: () => import('@/views/JoinView.vue'), meta: { public: true } },
+  { path: '/onboarding', component: () => import('@/views/OnboardingView.vue'), meta: { onboarding: true } },
+  { path: '/contracts', component: () => import('@/views/HomeView.vue') },
   { path: '/contracts/new', component: () => import('@/views/NewContractView.vue') },
+  { path: '/contracts/:id', component: () => import('@/views/ContractView.vue'), props: true },
+  { path: '/ledger', component: () => import('@/views/LedgerView.vue') },
+  { path: '/settings', component: () => import('@/views/SettingsView.vue') },
+  { path: '/:pathMatch(.*)*', redirect: '/' },
 ]
 
-const router = createRouter({ history: createWebHistory(), routes })
+const router = createRouter({
+  history: createWebHistory(),
+  routes,
+  scrollBehavior: () => ({ top: 0 }),
+})
 
 router.beforeEach((to) => {
-  if (!isConfigured && to.path !== '/setup') return '/setup'
-  if (to.meta.guest) return true
-  if (!useAuthStore().user) return { path: '/login', query: { next: to.fullPath } }
+  const auth = useAuthStore()
+  if (to.meta.public) return true
+  if (to.meta.guest) return auth.user ? '/contracts' : true
+  if (!auth.user) return { path: '/login', query: { next: to.fullPath } }
+  if (!auth.onboarded && !to.meta.onboarding) return { path: '/onboarding', query: { next: to.fullPath } }
   return true
 })
 

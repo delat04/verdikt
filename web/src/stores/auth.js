@@ -1,43 +1,42 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { supabase, isConfigured } from '@/lib/supabase'
+import { api } from '@/services'
 
+/* The signed-in person and their profile, from whichever backend is active. */
 export const useAuthStore = defineStore('auth', () => {
-  const session = ref(null)
+  const user = ref(null)
   const profile = ref(null)
+  const ready = ref(false)
 
-  const user = computed(() => session.value?.user ?? null)
-  const displayName = computed(() =>
-    profile.value?.display_name || user.value?.email?.split('@')[0] || 'Guest')
+  const name = computed(() => profile.value?.name || user.value?.email?.split('@')[0] || '')
+  const onboarded = computed(() => !!profile.value?.onboarded)
 
-  async function loadProfile() {
-    if (!user.value) { profile.value = null; return }
-    const { data } = await supabase.from('profiles').select('*').eq('id', user.value.id).maybeSingle()
-    profile.value = data
+  async function refresh() {
+    const s = await api.getSession()
+    user.value = s?.user ?? null
+    profile.value = s?.profile ?? null
+    ready.value = true
   }
 
   async function init() {
-    if (!isConfigured) return
-    const { data } = await supabase.auth.getSession()
-    session.value = data.session
-    await loadProfile()
-    supabase.auth.onAuthStateChange((_event, next) => {
-      session.value = next
-      loadProfile()
-    })
+    await refresh()
+    api.subscribe(() => refresh())
   }
 
-  async function signInWithEmail(email) {
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
-    })
-    if (error) throw error
+  async function signInAs(key) {
+    await api.signInAs(key)
+    await refresh()
+  }
+
+  async function updateProfile(patch) {
+    profile.value = await api.updateProfile(patch)
   }
 
   async function signOut() {
-    await supabase.auth.signOut()
+    await api.signOut()
+    user.value = null
+    profile.value = null
   }
 
-  return { session, profile, user, displayName, init, signInWithEmail, signOut }
+  return { user, profile, ready, name, onboarded, init, refresh, signInAs, updateProfile, signOut }
 })

@@ -1,0 +1,175 @@
+/*  ============================================================================
+    Verdikt DS — tokens (single source of truth)
+    Lineage: Aeon (token layering, pill cards, glide timing) · Dextra (cobalt, wizard motion)
+             · run-arrands (80/10/10 rule, app frame) · v2: the Workspace language — grey canvas,
+             soft 28px cards with a notched corner, circle controls, one inverted capsule (the rail).
+
+    THE RULE  80% surface (white, or a near-black variant) · 10% ink (text) · 10% accent.
+              Every border is 1px solid --vk-line (a grey tuned per theme so it reads on both).
+              Green is never decoration: it only means "verified" or "money released".
+              Cards never take a coloured left border — status uses the pill card (.vk-card--pill).
+              Cobalt fill means "your move" — only the card that waits on you is filled.
+              ONE WEIGHT: 400, everywhere. Hierarchy comes from size, colour and spacing — never bold.
+              Contrast: every text token passes WCAG AA (4.5:1) on both the surface and the canvas.
+    Theme: <html data-theme="light|dark">; no attribute = follow the device.
+    ============================================================================ */
+
+:root {
+  /* ---- type ---- */
+  --vk-font: 'Inter Tight Variable', 'Inter Tight', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --vk-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, Consolas, monospace;
+
+  /* composites — use with `font:` */
+  --vk-type-hero:    400 64px/.94 var(--vk-font);
+  --vk-type-display: 400 56px/1 var(--vk-font);
+  --vk-type-title:   400 34px/40px var(--vk-font);
+  --vk-type-page:    400 28px/34px var(--vk-font);
+  --vk-type-section: 400 18px/24px var(--vk-font);
+  --vk-type-card:    400 16px/22px var(--vk-font);
+  --vk-type-body:    400 14px/21px var(--vk-font);
+  --vk-type-dense:   400 13px/19px var(--vk-font);
+  --vk-type-small:   400 12px/17px var(--vk-font);
+  --vk-num-52: 400 52px/1 var(--vk-mono);
+  --vk-num-40: 400 40px/44px var(--vk-mono);
+  --vk-num-28: 400 28px/32px var(--vk-mono);
+  --vk-num-18: 400 18px/24px var(--vk-mono);
+  --vk-num-13: 400 13px/19px var(--vk-mono);
+  --vk-num-11: 400 11px/16px var(--vk-mono);
+
+  /* ---- shape ---- */
+  --vk-r-xs: 6px; --vk-r-sm: 10px; --vk-r-md: 14px; --vk-r-lg: 20px; --vk-r-xl: 28px; --vk-r-2xl: 36px; --vk-r-full: 999px;
+  --vk-h-sm: 30px; --vk-h-md: 38px; --vk-h-lg: 46px; --vk-h-xl: 44px;
+
+  /* ---- space (4pt) ---- */
+  --vk-sp-1: 4px; --vk-sp-2: 8px; --vk-sp-3: 12px; --vk-sp-4: 16px; --vk-sp-5: 20px;
+  --vk-sp-6: 24px; --vk-sp-8: 32px; --vk-sp-10: 40px; --vk-sp-12: 48px; --vk-sp-16: 64px;
+
+  /* ---- layout ---- */
+  --vk-topbar-h: 72px; --vk-sidebar-w: 248px; --vk-content-max: 1240px;
+
+  /* ---- motion ---- */
+  --vk-dur-1: 90ms; --vk-dur-2: 160ms; --vk-dur-3: 240ms; --vk-dur-4: 340ms;
+  --vk-ease-out: cubic-bezier(.16, 1, .3, 1);
+  --vk-ease-in-out: cubic-bezier(.65, 0, .35, 1);
+  /* glide: an indicator that travels between items — a short spring that lands, not stops */
+  --vk-dur-glide: 500ms; --vk-ease-glide: cubic-bezier(.34, 1.32, .5, 1);
+
+  /* ---- z ---- */
+  --vk-z-sticky: 10; --vk-z-chrome: 30; --vk-z-sheet: 200; --vk-z-modal: 300; --vk-z-toast: 500;
+}
+
+/* ============================== LIGHT ============================== */
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  /* surfaces — the 80% */
+  --vk-canvas: #F7F8FA;        /* behind everything — near-white; cards separate by their 1px line */
+  --vk-surface: #FFFFFF;       /* cards, panels, inputs */
+  --vk-surface-2: #F1F3F6;     /* wells, tracks, hover */
+  --vk-raised: #FFFFFF;        /* what sits on a --surface-2 track (segment thumb) */
+  --vk-hover: rgba(14, 15, 18, .04);
+  --vk-selected: rgba(14, 15, 18, .07);
+  --vk-thumb: #FFFFFF;         /* the chip a filter glides to (white on grey; flips to white-on-black in dark) */
+  --vk-thumb-fg: #0E0F12;
+
+  /* lines — always 1px solid */
+  --vk-line-subtle: #E5E7EB;
+  --vk-line: #D9DCE2;          /* reads against both white (#FFF) and the canvas (#F7F8FA) */
+  --vk-line-strong: #BCC1CA;
+
+  /* ink — the 10% text. Contrast on white / on canvas: */
+  --vk-ink: #0E0F12;           /* 19:1 / 18:1 */
+  --vk-ink-2: #2B2E35;         /* 14:1 / 13:1 */
+  --vk-muted: #4B505B;         /*  8:1 /  7.6:1 */
+  --vk-faint: #656B79;         /* 5.3:1 / 5:1 — the floor for any text */
+  --vk-on-ink: #FFFFFF;
+
+  /* accent — the 10% (cobalt = trust) */
+  --vk-accent: #315EFB;
+  --vk-accent-hover: #2448D8;
+  --vk-accent-text: #2448D8;
+  --vk-accent-soft: #EEF2FF;
+  --vk-accent-line: #CBD7FF;
+  --vk-on-accent: #FFFFFF;
+
+  /* status: solid (dots, bars) · ink (words) · soft (surface) */
+  --vk-ok: #12B76A;     --vk-ok-ink: #0B7A47;     --vk-ok-soft: #E7F8EF;
+  --vk-warn: #D98A04;   --vk-warn-ink: #8A5600;   --vk-warn-soft: #FEF4E2;
+  --vk-danger: #E5484D; --vk-danger-ink: #A3292D; --vk-danger-soft: #FDECEC;
+  --vk-rail-ok: #3BE37A;       /* "paid" on the inverted rail (ink capsule in light) */
+
+  /* elevation (light: shadows; dark: hairlines) */
+  --vk-elev-1: 0 1px 2px rgba(14, 15, 18, .04);
+  --vk-elev-pop: 0 16px 40px -16px rgba(14, 15, 18, .22), 0 2px 6px rgba(14, 15, 18, .04);
+  --vk-elev-modal: 0 24px 60px -18px rgba(14, 15, 18, .30), 0 4px 12px rgba(14, 15, 18, .06);
+  --vk-scrim: rgba(14, 15, 18, .32);
+  --vk-focus: rgba(49, 94, 251, .18);
+}
+
+/* ============================== DARK ============================== */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --vk-canvas: #060607;
+  --vk-surface: #111214;
+  --vk-surface-2: #18191C;
+  --vk-raised: #222327;
+  --vk-hover: rgba(255, 255, 255, .05);
+  --vk-selected: rgba(255, 255, 255, .08);
+  --vk-thumb: #F2F3F5;
+  --vk-thumb-fg: #0E0F12;
+
+  --vk-line-subtle: #212328;
+  --vk-line: #2C2E34;
+  --vk-line-strong: #40434B;
+
+  --vk-ink: #F2F3F5;           /* contrast on surface (#111214): 17:1 */
+  --vk-ink-2: #D6D8DE;         /* 13:1 */
+  --vk-muted: #A9ADB7;         /* 8:1 */
+  --vk-faint: #868B97;         /* 5.4:1 — the floor for any text */
+  --vk-on-ink: #0E0F12;
+
+  --vk-accent: #3560FA;        /* white text on it: 5:1 */
+  --vk-accent-hover: #4C74FF;
+  --vk-accent-text: #9DB2FF;
+  --vk-accent-soft: rgba(53, 96, 250, .18);
+  --vk-accent-line: rgba(120, 150, 255, .45);
+  --vk-on-accent: #FFFFFF;
+
+  --vk-ok: #3BE37A;     --vk-ok-ink: #5BEA8F;     --vk-ok-soft: rgba(59, 227, 122, .12);
+  --vk-warn: #FBBF24;   --vk-warn-ink: #FCD34D;   --vk-warn-soft: rgba(251, 191, 36, .12);
+  --vk-danger: #F87171; --vk-danger-ink: #FCA5A5; --vk-danger-soft: rgba(248, 113, 113, .12);
+  --vk-rail-ok: #0B8F4F;
+
+  --vk-elev-1: none;
+  --vk-elev-pop: inset 0 1px 0 rgba(255, 255, 255, .04), 0 12px 32px -6px rgba(0, 0, 0, .7);
+  --vk-elev-modal: inset 0 1px 0 rgba(255, 255, 255, .05), 0 24px 64px -12px rgba(0, 0, 0, .8);
+  --vk-scrim: rgba(0, 0, 0, .62);
+  --vk-focus: rgba(106, 139, 255, .28);
+}
+
+/* No explicit choice: follow the device (the same dark values, kept in step with the block above) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --vk-canvas: #060607; --vk-surface: #111214; --vk-surface-2: #18191C; --vk-raised: #222327;
+    --vk-hover: rgba(255, 255, 255, .05); --vk-selected: rgba(255, 255, 255, .08);
+    --vk-thumb: #F2F3F5; --vk-thumb-fg: #0E0F12;
+    --vk-line-subtle: #212328; --vk-line: #2C2E34; --vk-line-strong: #40434B;
+    --vk-ink: #F2F3F5; --vk-ink-2: #D6D8DE; --vk-muted: #A9ADB7; --vk-faint: #868B97; --vk-on-ink: #0E0F12;
+    --vk-accent: #3560FA; --vk-accent-hover: #4C74FF; --vk-accent-text: #9DB2FF;
+    --vk-accent-soft: rgba(53, 96, 250, .18); --vk-accent-line: rgba(120, 150, 255, .45); --vk-on-accent: #FFFFFF;
+    --vk-ok: #3BE37A; --vk-ok-ink: #5BEA8F; --vk-ok-soft: rgba(59, 227, 122, .12);
+    --vk-warn: #FBBF24; --vk-warn-ink: #FCD34D; --vk-warn-soft: rgba(251, 191, 36, .12);
+    --vk-danger: #F87171; --vk-danger-ink: #FCA5A5; --vk-danger-soft: rgba(248, 113, 113, .12);
+    --vk-rail-ok: #0B8F4F;
+    --vk-elev-1: none;
+    --vk-elev-pop: inset 0 1px 0 rgba(255, 255, 255, .04), 0 12px 32px -6px rgba(0, 0, 0, .7);
+    --vk-elev-modal: inset 0 1px 0 rgba(255, 255, 255, .05), 0 24px 64px -12px rgba(0, 0, 0, .8);
+    --vk-scrim: rgba(0, 0, 0, .62); --vk-focus: rgba(106, 139, 255, .28);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --vk-dur-1: .01ms; --vk-dur-2: .01ms; --vk-dur-3: .01ms; --vk-dur-4: .01ms; --vk-dur-glide: .01ms; }
+}

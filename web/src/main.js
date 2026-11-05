@@ -6,11 +6,13 @@ import './styles/main.css'
 import App from './App.vue'
 import router from './router'
 import { useAuthStore } from './stores/auth'
+import { vGlide } from './directives/glide'
 
 const app = createApp(App)
 app.use(createPinia())
+app.directive('glide', vGlide)
 
-await useAuthStore().init()
-
-app.use(router)
-app.mount('#app')
+useAuthStore().init().finally(() => {
+  app.use(router)
+  app.mount('#app')
+})
