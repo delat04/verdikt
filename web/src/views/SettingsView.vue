@@ -11,6 +11,7 @@ import { useTheme } from '@/composables/useTheme'
 import { toast } from '@/composables/useToast'
 import { isDemo } from '@/services'
 import AgentAccess from '@/components/AgentAccess.vue'
+import ProofSettings from '@/components/ProofSettings.vue'
 
 const auth = useAuthStore()
 const { theme, setTheme } = useTheme()
@@ -61,6 +62,8 @@ async function save() {
             <div><VButton type="submit" :loading="busy">Save changes</VButton></div>
           </form>
         </VCard>
+
+        <ProofSettings />
 
         <AgentAccess />
 

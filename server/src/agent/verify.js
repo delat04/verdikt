@@ -114,7 +114,7 @@ export async function resumeVerifications() {
 }
 
 async function verify(milestoneId, submissionId) {
-  const { data: m } = await db().from('milestones').select('*, criteria(*), contract:contracts(id, title, brief)').eq('id', milestoneId).single()
+  const { data: m } = await db().from('milestones').select('*, criteria(*), contract:contracts(id, title, brief, currency, release_mode)').eq('id', milestoneId).single()
   const { data: sub } = await db().from('submissions').select('*').eq('id', submissionId).single()
   const criteria = [...m.criteria].sort((a, b) => a.position - b.position)
 
@@ -248,10 +248,23 @@ async function verify(milestoneId, submissionId) {
   // ---- 4. money
   if (outcome === 'pass') {
     try {
-      await release(m, 'agent')
+      await release(m, 'agent', { passed: results.length, total: results.length })
     } catch (e) {
       // Leave it 'passed': the client can release by hand; the error is in the audit log
       await audit({ contractId: m.contract_id, milestoneId, actor: 'paypal', event: 'escrow.capture_failed', payload: { message: e.message } })
+    }
+  } else if (m.contract.release_mode === 'per_check' && !tampered) {
+    // check by check: the passing checks have earned their share — capture it now and keep the authorization
+    // open (final_capture=false) for the rest; a tampered delivery earns nothing
+    const passedN = results.length - failed.length
+    const earned = Math.floor((m.amount_cents * passedN) / results.length)
+    const delta = earned - (m.released_cents || 0)
+    if (delta >= 100) {
+      try {
+        await release(m, 'agent', { amountCents: delta, final: false, passed: passedN, total: results.length })
+      } catch (e) {
+        await audit({ contractId: m.contract_id, milestoneId, actor: 'paypal', event: 'escrow.capture_failed', payload: { message: e.message, partial: true } })
+      }
     }
   }
 }

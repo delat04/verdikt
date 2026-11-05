@@ -6,6 +6,7 @@ const routes = [
   { path: '/design', component: () => import('@/views/DesignSystemView.vue'), meta: { public: true } },
   { path: '/login', component: () => import('@/views/LoginView.vue'), meta: { guest: true } },
   { path: '/auth/callback', component: () => import('@/views/AuthCallbackView.vue'), meta: { public: true } },
+  { path: '/u/:handle', component: () => import('@/views/ProofView.vue'), props: true, meta: { public: true } },
   { path: '/join/:code?', component: () => import('@/views/JoinView.vue'), meta: { public: true } },
   { path: '/onboarding', component: () => import('@/views/OnboardingView.vue'), meta: { onboarding: true } },
   { path: '/contracts', component: () => import('@/views/HomeView.vue') },

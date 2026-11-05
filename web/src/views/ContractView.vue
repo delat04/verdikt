@@ -32,6 +32,8 @@ import SubmitWork from '@/components/SubmitWork.vue'
 import FundModal from '@/components/FundModal.vue'
 import ActivityFeed from '@/components/ActivityFeed.vue'
 import ContractRoom from '@/components/ContractRoom.vue'
+import CheckMeter from '@/components/CheckMeter.vue'
+import ChangeOrders from '@/components/ChangeOrders.vue'
 import { ACTION } from '@/components/actionMeta'
 import { useLive } from '@/composables/useLive'
 import { useSplitScroll } from '@/composables/useSplitScroll'
@@ -154,6 +156,9 @@ watch([step, () => route.query.act], ([s, want]) => {
   router.replace({ query: { ...route.query, act: undefined } })
 }, { immediate: true })
 
+// how money moves: the whole milestone on a pass, or check by check (part of the terms; changing it resets signatures)
+const perCheck = computed(() => contract.value?.releaseMode === 'per_check')
+const setMode = (mode) => run('mode', () => api.setReleaseMode(contract.value.id, mode), { text: mode === 'per_check' ? 'Money will move check by check — both of you sign again' : 'Each milestone releases whole — both of you sign again' })
 const saveCriteria = (list) => run('criteria', () => api.updateCriteria(ms.value.id, list), { text: 'Checks saved — both of you sign again' })
 const sign = () => run('sign', () => api.signTerms(contract.value.id), { text: 'Terms signed' })
 const refund = () => run('refund', () => api.refund(ms.value.id), { text: 'Hold voided — you were not charged' })
@@ -299,6 +304,7 @@ const canSubmit = computed(() => role.value === 'freelancer' && ms.value && curr
             </template>
 
             <StageTrack v-if="signed && !['draft', 'awaiting_funding'].includes(ms.status)" :milestone="ms" class="ms__track" />
+            <CheckMeter v-if="perCheck && signed && ms.criteria.length && !['draft', 'awaiting_funding'].includes(ms.status)" :milestone="ms" :currency="contract.currency" class="ms__meter" />
 
             <VTabs v-model="tab" :options="tabs" label="Milestone sections" class="ms__tabs" />
 
@@ -313,6 +319,21 @@ const canSubmit = computed(() => role.value === 'freelancer' && ms.value && curr
                   {{ signed ? `Signed by both parties. The agent checks exactly these ${ms.criteria.length} things — nothing more.` : 'These are the exact checks the agent will run on the delivery. Edit anything that isn\'t right, then sign.' }}
                 </p>
                 <CriteriaEditor :criteria="ms.criteria" :editable="canEditTerms" :saving="busy === 'criteria'" @save="saveCriteria" />
+                <!-- how the money moves, agreed with the checks -->
+                <div class="mode">
+                  <div class="mode__text">
+                    <p class="mode__title">How the money moves</p>
+                    <p class="mode__sub">{{ perCheck
+                      ? `Check by check: each passing check releases ${money(Math.floor(ms.amountCents / Math.max(1, ms.criteria.length)), contract.currency, { whole: true })} from the PayPal hold right away — several partial captures on one authorization. The last check releases the rest.`
+                      : 'Whole milestone: PayPal captures the full hold when every check passes.' }}</p>
+                  </div>
+                  <VSegmented
+                    v-if="canEditTerms" :model-value="contract.releaseMode" label="How the money moves"
+                    :options="[{ value: 'whole', label: 'Whole' }, { value: 'per_check', label: 'Check by check' }]"
+                    @update:model-value="setMode"
+                  />
+                  <VPill v-else size="sm" :dot="false" outline>{{ perCheck ? 'Check by check' : 'Whole milestone' }}</VPill>
+                </div>
               </template>
             </div>
 
@@ -459,10 +480,11 @@ const canSubmit = computed(() => role.value === 'freelancer' && ms.value && curr
                 <div class="vk-kv__row"><dt class="vk-kv__k">Amount</dt><dd class="vk-kv__v">{{ money(ms.amountCents, contract.currency) }}</dd></div>
                 <div class="vk-kv__row"><dt class="vk-kv__k">Status</dt><dd class="vk-kv__v"><StatusPill :status="ms.status" size="sm" /></dd></div>
                 <div v-if="ms.fundedAt" class="vk-kv__row"><dt class="vk-kv__k">Held since</dt><dd class="vk-kv__v">{{ shortDate(ms.fundedAt) }} · {{ timeAgo(ms.fundedAt) }}</dd></div>
+                <div v-if="!ms.releasedAt && ms.releasedCents" class="vk-kv__row"><dt class="vk-kv__k">Released so far</dt><dd class="vk-kv__v">{{ money(ms.releasedCents, contract.currency) }} of {{ money(ms.amountCents, contract.currency) }} · the rest stays held</dd></div>
                 <div v-if="ms.releasedAt" class="vk-kv__row"><dt class="vk-kv__k">Released</dt><dd class="vk-kv__v">{{ money(ms.releasedCents || ms.amountCents, contract.currency) }} · {{ shortDate(ms.releasedAt) }}</dd></div>
                 <div v-if="ms.voidedCents" class="vk-kv__row"><dt class="vk-kv__k">Returned to the client</dt><dd class="vk-kv__v">{{ money(ms.voidedCents, contract.currency) }}</dd></div>
-                <div v-if="ms.status === 'released' && ms.feeCents != null" class="vk-kv__row"><dt class="vk-kv__k">Verdikt fee ({{ FEE_PERCENT }}%)</dt><dd class="vk-kv__v">{{ money(ms.feeCents, contract.currency) }}</dd></div>
-                <div v-if="ms.status === 'released' && ms.payoutCents != null" class="vk-kv__row">
+                <div v-if="ms.releasedCents && ms.feeCents != null" class="vk-kv__row"><dt class="vk-kv__k">Verdikt fee ({{ FEE_PERCENT }}%)</dt><dd class="vk-kv__v">{{ money(ms.feeCents, contract.currency) }}</dd></div>
+                <div v-if="ms.releasedCents && ms.payoutCents != null" class="vk-kv__row">
                   <dt class="vk-kv__k">Paid to the freelancer</dt>
                   <dd class="vk-kv__v">{{ money(ms.payoutCents, contract.currency) }}<template v-if="payoutMeta"> · {{ payoutMeta.label.toLowerCase() }}</template></dd>
                 </div>
@@ -473,6 +495,19 @@ const canSubmit = computed(() => role.value === 'freelancer' && ms.value && curr
                 <div v-if="ms.paypal?.payoutBatchId" class="vk-kv__row"><dt class="vk-kv__k">Payout batch</dt><dd class="vk-kv__v"><VCopy :value="ms.paypal.payoutBatchId" /></dd></div>
                 <div v-if="ms.paypal?.payoutItemId" class="vk-kv__row"><dt class="vk-kv__k">Payout item</dt><dd class="vk-kv__v"><VCopy :value="ms.paypal.payoutItemId" /></dd></div>
               </dl>
+              <!-- check by check: every capture from the one authorization, and its payout -->
+              <div v-if="(ms.tranches || []).length > 1 || (ms.tranches || []).some((t) => t.final === false)" class="tranches">
+                <p class="tranches__title">PayPal captures on this hold</p>
+                <ol>
+                  <li v-for="(t, i) in ms.tranches" :key="t.captureId">
+                    <span class="tranches__n vk-num">{{ i + 1 }}</span>
+                    <span class="tranches__what">{{ t.passed != null ? `${t.passed} of ${t.total} checks` : 'Released' }}<template v-if="t.final"> · final</template></span>
+                    <span class="vk-num">{{ money(t.cents, contract.currency) }}</span>
+                    <span class="tranches__paid vk-faint">{{ t.payoutStatus === 'SUCCESS' ? `paid ${money(t.netCents, contract.currency)}` : t.payoutStatus ? t.payoutStatus.toLowerCase().replace('_', ' ') : '' }}</span>
+                    <VCopy :value="t.captureId" />
+                  </li>
+                </ol>
+              </div>
               <div v-if="role === 'client' && current?.id === ms.id && ['awaiting_funding', 'draft'].includes(ms.status) && signed" class="pay__cta">
                 <VButton :icon="Wallet" @click="modal = 'fund'">Fund {{ money(ms.amountCents, contract.currency) }} with PayPal</VButton>
               </div>
@@ -505,6 +540,8 @@ const canSubmit = computed(() => role.value === 'freelancer' && ms.value && curr
               <VButton size="sm" variant="ghost" :icon="MessagesSquare" @click="modal = 'room'">Read</VButton>
             </div>
           </VCard>
+
+          <ChangeOrders v-if="signed" :contract="contract" :role="role" />
 
           <VCard title="Ledger" sub="Every signature, PayPal event and agent decision.">
             <ActivityFeed :items="contract.activity" :contract="contract" />
@@ -633,6 +670,19 @@ const canSubmit = computed(() => role.value === 'freelancer' && ms.value && curr
 .ms__right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .ms__amount { margin: 0; font: var(--vk-num-18); }
 .ms__track { margin: 6px 0 26px; }
+.ms__meter { margin: -10px 0 24px; }
+.mode { display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap; margin-top: 22px; padding: 14px 16px; border: 1px solid var(--vk-line); border-radius: var(--vk-r-md); background: var(--vk-surface-2); }
+.mode__text { flex: 1 1 280px; min-width: 0; }
+.mode__title { margin: 0; font: 400 14px/20px var(--vk-font); color: var(--vk-ink); }
+.mode__sub { margin: 4px 0 0; font: var(--vk-type-small); color: var(--vk-muted); }
+.tranches { margin-top: 18px; padding: 14px 16px; border: 1px solid var(--vk-line); border-radius: var(--vk-r-md); }
+.tranches__title { margin: 0 0 10px; font: var(--vk-type-dense); color: var(--vk-ink); }
+.tranches ol { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.tranches li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto auto; gap: 10px; align-items: center; font: var(--vk-type-small); }
+.tranches__n { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--vk-line-strong); font-size: 11px; }
+.tranches__what { color: var(--vk-ink-2); }
+.tranches__paid { white-space: nowrap; }
+@media (max-width: 640px) { .tranches li { grid-template-columns: 22px minmax(0, 1fr) auto; } .tranches__paid, .tranches li :deep(.vk-copy) { display: none; } }
 /* the tabs stick to the top of the column while you read a long report; they span the card edge to edge */
 .ms__tabs {
   position: sticky; top: -20px; z-index: 2; margin: 0 calc(var(--vk-card-pad) * -1) 4px; padding: 8px var(--vk-card-pad) 0;

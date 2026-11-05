@@ -32,7 +32,7 @@ const steps = [
   { icon: PenLine, title: 'Agree the terms together', text: 'Talk it through in a contract room. A neutral AI mediator keeps a versioned terms sheet and turns wishes into checks it can test.' },
   { icon: Wallet, title: 'PayPal holds the money', text: 'The client funds each milestone with a PayPal authorization — a hold, not a charge.' },
   { icon: ScanSearch, title: 'The agent checks the delivery', text: 'It opens the live site at desktop and mobile sizes, runs each check, reads the repo, and keeps the evidence.' },
-  { icon: Banknote, title: 'Proven → released', text: 'Every check passes: PayPal captures and the freelancer is paid. Not yet: it stays held, and both sides see why.' },
+  { icon: Banknote, title: 'Proven → released', text: 'Every check passes: PayPal captures and the freelancer is paid. Or check by check — each passing check releases its share. Not yet: it stays held, and both sides see why.' },
 ]
 </script>
 

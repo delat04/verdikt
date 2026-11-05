@@ -63,8 +63,10 @@ export default async function escrowRoutes(app) {
     if (!m) return
     if (!m.paypal_authorization_id || ['released', 'refunded'].includes(m.status)) return reply.code(409).send({ error: `Milestone is ${m.status}` })
     const amountCents = request.body?.amountCents == null ? undefined : Math.round(Number(request.body.amountCents))
-    if (amountCents !== undefined && !(amountCents >= 100 && amountCents <= m.amount_cents)) {
-      return reply.code(400).send({ error: 'Release between $1.00 and the milestone amount' })
+    // check by check, part of the hold may already be released: what's left is what can go now
+    const left = m.amount_cents - (m.released_cents || 0)
+    if (amountCents !== undefined && !(amountCents >= 100 && amountCents <= left)) {
+      return reply.code(400).send({ error: 'Release between $1.00 and what is still held' })
     }
     const capture = await release({ ...m, contract_id: m.contract.id }, 'client', { amountCents })
     return { status: 'released', captureId: capture.id }

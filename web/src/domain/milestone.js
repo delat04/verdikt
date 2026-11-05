@@ -102,9 +102,10 @@ export function contractTotals(contract) {
   const sum = (list) => list.reduce((s, m) => s + m.amountCents, 0)
   return {
     total: sum(ms),
-    held: sum(ms.filter((m) => HELD.includes(m.status))),
+    // check by check, part of a held milestone may already be released: held is what's left
+    held: ms.filter((m) => HELD.includes(m.status)).reduce((s, m) => s + m.amountCents - (m.releasedCents || 0), 0),
     // a partial release counts what was actually captured, not the milestone amount
-    released: ms.filter((m) => m.status === 'released').reduce((s, m) => s + (m.releasedCents ?? m.amountCents), 0),
+    released: ms.reduce((s, m) => s + (m.status === 'released' ? (m.releasedCents ?? m.amountCents) : (m.releasedCents || 0)), 0),
     releasedCount: ms.filter((m) => m.status === 'released').length,
   }
 }

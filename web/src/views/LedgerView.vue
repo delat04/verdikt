@@ -35,7 +35,7 @@ const rows = computed(() => (data.value || []).flatMap((c) => {
   const other = counterparty(c, role)
   return c.milestones.map((m) => {
     const v = latestSubmission(m)?.verdict
-    const released = m.status === 'released' ? (m.releasedCents ?? m.amountCents) : 0
+    const released = m.status === 'released' ? (m.releasedCents ?? m.amountCents) : (m.releasedCents || 0)
     return {
       contractId: c.id,
       contract: c.title,
@@ -44,7 +44,7 @@ const rows = computed(() => (data.value || []).flatMap((c) => {
       with: other?.name || 'Not joined',
       status: m.status,
       amount: m.amountCents,
-      held: HELD.includes(m.status) ? m.amountCents : 0,
+      held: HELD.includes(m.status) ? m.amountCents - (m.releasedCents || 0) : 0,
       released,
       returned: m.voidedCents || (m.status === 'refunded' ? m.amountCents : 0),
       fee: m.feeCents || 0,

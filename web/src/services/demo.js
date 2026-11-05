@@ -204,7 +204,16 @@ async function runVerification(milestoneId) {
     if (outcome === 'pass') {
       await wait(1400)
       ;({ c, m } = findMilestone(milestoneId))
-      capture(c, m, 'agent')
+      capture(c, m, 'agent', undefined, { passed: results.length, total: results.length })
+    } else if (c.releaseMode === 'per_check' && !tampered) {
+      // check by check: the passing checks have earned their share of the hold
+      const passed = results.length - failed.length
+      const delta = Math.floor((m.amountCents * passed) / results.length) - (m.releasedCents || 0)
+      if (delta >= 100) {
+        await wait(1200)
+        ;({ c, m } = findMilestone(milestoneId))
+        capture(c, m, 'agent', delta, { final: false, passed, total: results.length })
+      }
     }
   } finally {
     running.delete(milestoneId)
@@ -213,15 +222,24 @@ async function runVerification(milestoneId) {
 
 const code = (prefix) => `${prefix}-${Math.random().toString(36).slice(2, 10).toUpperCase()}`
 
-function capture(c, m, actor, cents = m.amountCents) {
-  const partial = cents < m.amountCents
-  m.status = 'released'
-  m.releasedAt = now()
-  m.releasedCents = cents
-  m.voidedCents = m.amountCents - cents
+// each capture is a tranche: check by check, partial captures (final_capture=false) release what the passing
+// checks earned; the final one releases the rest (or part of it, returning what's left)
+function capture(c, m, actor, cents, { final = true, passed = null, total = null } = {}) {
+  const already = m.releasedCents || 0
+  const amount = Math.min(m.amountCents - already, cents ?? m.amountCents - already)
+  const releasedNow = already + amount
   m.paypal.captureId = code('DEMO-CAP')
-  log(c, 'paypal', partial ? 'escrow.partially_released' : 'escrow.released', { captureId: m.paypal.captureId, amountCents: cents, ofCents: m.amountCents, returnedCents: m.amountCents - cents, by: actor }, m.id)
-  sendPayout(c, m)
+  m.tranches = [...(m.tranches || []), { captureId: m.paypal.captureId, cents: amount, passed, total, final, at: now() }]
+  m.releasedCents = releasedNow
+  if (final) {
+    m.status = 'released'
+    m.releasedAt = now()
+    m.voidedCents = m.amountCents - releasedNow
+  }
+  log(c, 'paypal', !final ? 'escrow.check_released' : releasedNow < m.amountCents ? 'escrow.partially_released' : 'escrow.released',
+    { captureId: m.paypal.captureId, amountCents: amount, releasedCents: releasedNow, ofCents: m.amountCents, returnedCents: final ? m.amountCents - releasedNow : 0, passed, total, by: actor }, m.id)
+  sendPayout(c, m, m.tranches.at(-1))
+  if (!final) { save(); return }
   const next = c.milestones.find((x) => x.status === 'draft')
   if (next) next.status = 'awaiting_funding'
   if (c.milestones.every((x) => ['released', 'refunded'].includes(x.status))) {
@@ -232,21 +250,28 @@ function capture(c, m, actor, cents = m.amountCents) {
 }
 
 // the platform pays the freelancer out of the capture, minus Verdikt's fee (PayPal Payouts in live mode)
-function sendPayout(c, m) {
+function sendPayout(c, m, tranche) {
   const fl = db.profiles[c.freelancer?.id]
   const email = fl?.paypalEmail || fl?.email || c.freelancer?.email
-  const { fee, net } = split(m.releasedCents)
-  Object.assign(m, { feeCents: fee, payoutCents: net, payoutEmail: email, payoutStatus: 'PENDING' })
-  m.paypal.payoutBatchId = code('DEMO-PAYOUT')
-  log(c, 'paypal', 'payout.sent', { amountCents: net, feeCents: fee, email, batchId: m.paypal.payoutBatchId }, m.id)
+  const t = tranche || { cents: m.releasedCents }
+  const { fee, net } = split(t.cents)
+  Object.assign(t, { feeCents: fee, netCents: net, payoutBatchId: code('DEMO-PAYOUT'), payoutStatus: 'PENDING' })
+  Object.assign(m, { feeCents: (m.feeCents || 0) + fee, payoutCents: (m.payoutCents || 0) + net, payoutEmail: email, payoutStatus: 'PENDING' })
+  m.paypal.payoutBatchId = t.payoutBatchId
+  log(c, 'paypal', 'payout.sent', { amountCents: net, feeCents: fee, email, batchId: t.payoutBatchId, tranche: (m.tranches || []).length || 1 }, m.id)
   const id = m.id
+  const batch = t.payoutBatchId
   setTimeout(() => {
     const found = (() => { try { return findMilestone(id) } catch { return null } })()
-    if (!found || found.m.payoutStatus !== 'PENDING') return
-    found.m.payoutStatus = 'SUCCESS'
-    found.m.paidOutAt = now()
+    if (!found) return
+    const ft = (found.m.tranches || []).find((x) => x.payoutBatchId === batch)
+    if (ft) Object.assign(ft, { payoutStatus: 'SUCCESS', paidOutAt: now() })
+    if ((found.m.tranches || []).every((x) => x.payoutStatus === 'SUCCESS') || !ft) {
+      found.m.payoutStatus = 'SUCCESS'
+      found.m.paidOutAt = now()
+    }
     found.m.paypal.payoutItemId = code('DEMO-ITEM')
-    log(found.c, 'paypal', 'payout.completed', { amountCents: found.m.payoutCents, email: found.m.payoutEmail }, id)
+    log(found.c, 'paypal', 'payout.completed', { amountCents: net, email }, id)
     save()
   }, 2200)
 }
@@ -621,6 +646,19 @@ export const demo = {
     save()
   },
 
+  async setReleaseMode(contractId, mode) {
+    await latency()
+    const c = findContract(contractId)
+    const role = assertParty(c)
+    if (c.clientSignedAt && c.freelancerSignedAt) throw new Error('Terms are signed by both parties and locked')
+    if ((c.releaseMode || 'whole') === mode) return
+    c.releaseMode = mode
+    c.clientSignedAt = null
+    c.freelancerSignedAt = null
+    log(c, role, 'terms.release_mode', { mode })
+    save()
+  },
+
   // ---- terms
   async updateCriteria(milestoneId, criteria) {
     await latency()
@@ -672,7 +710,8 @@ export const demo = {
     await latency()
     const { c, m } = findMilestone(milestoneId)
     if (assertParty(c) !== 'client') throw new Error('Only the client can release early.')
-    const cents = amountCents ? Math.min(m.amountCents, Math.max(100, Math.round(amountCents))) : m.amountCents
+    const left = m.amountCents - (m.releasedCents || 0)
+    const cents = amountCents ? Math.min(left, Math.max(100, Math.round(amountCents))) : left
     capture(c, m, 'client', cents)
   },
   async retryPayout(milestoneId) {
@@ -688,9 +727,12 @@ export const demo = {
     const { c, m } = findMilestone(milestoneId)
     if (assertParty(c) !== 'client') throw new Error('Only the client can request a refund.')
     if (m.status !== 'failed') throw new Error('Refunds need a failed verdict.')
-    m.status = 'refunded'
-    m.voidedCents = m.amountCents
-    log(c, 'paypal', 'escrow.refunded', { amountCents: m.amountCents }, m.id)
+    // check by check, the freelancer keeps the tranches already released; the rest of the hold is voided
+    const kept = m.releasedCents || 0
+    m.status = kept ? 'released' : 'refunded'
+    m.voidedCents = m.amountCents - kept
+    if (kept) m.releasedAt = now()
+    log(c, 'paypal', 'escrow.refunded', { amountCents: m.amountCents - kept, keptCents: kept }, m.id)
     const next = c.milestones.find((x) => x.status === 'draft')
     if (next) next.status = 'awaiting_funding'
     if (c.milestones.every((x) => ['released', 'refunded'].includes(x.status))) c.status = 'completed'
@@ -743,6 +785,120 @@ export const demo = {
   async askLedger(question) {
     await wait(500 + Math.random() * 400)
     return askLocal(question)
+  },
+  // ---- change orders: checked against the signed checks first (rule-based in the demo)
+  async requestChange(contractId, request) {
+    await latency()
+    const c = findContract(contractId)
+    const role = assertParty(c)
+    if (!(c.clientSignedAt && c.freelancerSignedAt)) throw new Error('Change orders start once both of you have signed the terms')
+    const ch = { id: uid('ch'), requestedBy: role, request: request.slice(0, 1000), status: 'reviewing', coveredBy: '', reply: '', title: null, doneMeans: [], amountCents: null, dueDays: null, pricedBy: null, createdAt: now() }
+    c.changes = [...(c.changes || []), ch]
+    log(c, role, 'change.requested', { request: request.slice(0, 120) })
+    save()
+    setTimeout(() => {
+      const cc = db.contracts.find((x) => x.id === contractId)
+      const it = cc?.changes?.find((x) => x.id === ch.id)
+      if (!it) return
+      const words = (t) => new Set(t.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3).map((w) => w.replace(/s$/, '')))
+      const ask = words(request)
+      const phones = /phone|mobile|375/.test(request.toLowerCase())
+      const checks = cc.milestones.flatMap((m) => m.criteria.map((x) => ({ m, x })))
+      const hit = checks.find(({ x }) => (phones && /375px/.test(x.statement)) || [...words(x.statement)].filter((w) => ask.has(w)).length >= 2)
+      const first = (p) => p?.name.split(' ')[0]
+      const names = `${first(cc.client)}, ${first(cc.freelancer)}`
+      if (hit) {
+        Object.assign(it, { status: 'in_scope', coveredBy: `M${hit.m.position}: "${hit.x.statement}"`, reply: `${names}: this is already part of what you signed, so it's owed at no extra cost. If the delivery doesn't meet it, the check fails and the money stays held.` })
+        log(cc, 'agent', 'change.in_scope', {})
+      } else {
+        const total = cc.milestones.reduce((s, m) => s + m.amountCents, 0)
+        const per = total / Math.max(1, checks.length)
+        const title = request.replace(/^(can|could|please|would)\b[^a-z]*/i, '').replace(/^(you|we)\s+(also\s+)?(add|build|make|create)\s+/i, '').replace(/[?.!].*$/, '').slice(0, 48)
+        Object.assign(it, {
+          status: 'proposed', pricedBy: 'agent', dueDays: 7, amountCents: Math.max(100, Math.round((per * 3) / 1000) * 1000),
+          title: title.charAt(0).toUpperCase() + title.slice(1),
+          doneMeans: [`The live site has ${title.toLowerCase()}, reachable from the main page`, 'It works at 375px wide with no sideways scrolling and no console errors', 'The public repository contains the code for it'],
+          reply: `${names}: nothing you signed covers this, so it's new work. I've drafted it as a separate milestone, priced from this contract's rates, for you to accept, counter or decline.`,
+        })
+        log(cc, 'agent', 'change.proposed', { amountCents: it.amountCents, title: it.title })
+      }
+      save()
+    }, 1800)
+  },
+  async acceptChange(id) {
+    await latency()
+    const c = db.contracts.find((x) => x.changes?.some((ch) => ch.id === id))
+    const ch = c?.changes.find((x) => x.id === id)
+    if (!ch || ch.status !== 'proposed') throw new Error('This change is no longer open')
+    const role = assertParty(c)
+    const decider = ch.pricedBy === 'agent' ? (ch.requestedBy === 'client' ? 'freelancer' : 'client') : ch.pricedBy === 'client' ? 'freelancer' : 'client'
+    if (role !== decider) throw new Error('Waiting for the other side to respond to this price')
+    const open = c.milestones.some((m) => !['released', 'refunded'].includes(m.status))
+    const m = {
+      id: uid('m'), position: c.milestones.length + 1, title: ch.title, description: ch.doneMeans.join('. '), amountCents: ch.amountCents,
+      dueAt: new Date(Date.now() + ch.dueDays * 864e5).toISOString(), status: open ? 'draft' : 'awaiting_funding',
+      fundedAt: null, releasedAt: null, paypal: {}, submissions: [], appeals: [], disputes: [], tranches: [],
+      criteria: ch.doneMeans.map((d, i) => ({ id: uid('cr'), position: i + 1, kind: /375px/.test(d) ? 'visual' : 'functional', statement: d, method: 'Agreed as a change order; checked against the live URL and repository.' })),
+    }
+    c.milestones.push(m)
+    Object.assign(ch, { status: 'accepted', milestoneId: m.id })
+    if (c.status === 'completed') c.status = 'active'
+    log(c, role, 'change.accepted', { amountCents: ch.amountCents, title: ch.title, position: m.position }, m.id)
+    save()
+  },
+  async counterChange(id, { amountCents, dueDays }) {
+    await latency()
+    const c = db.contracts.find((x) => x.changes?.some((ch) => ch.id === id))
+    const ch = c.changes.find((x) => x.id === id)
+    const role = assertParty(c)
+    Object.assign(ch, { amountCents, dueDays, pricedBy: role })
+    log(c, role, 'change.countered', { amountCents, dueDays })
+    save()
+  },
+  async declineChange(id) {
+    await latency()
+    const c = db.contracts.find((x) => x.changes?.some((ch) => ch.id === id))
+    const ch = c.changes.find((x) => x.id === id)
+    const role = assertParty(c)
+    ch.status = 'declined'
+    log(c, role, 'change.declined', { title: ch.title })
+    save()
+  },
+
+  // ---- proof of work (public page): only released, verified milestones; clients stay anonymous
+  async setProofSettings({ handle, headline, publicProof }) {
+    await latency()
+    if (!/^[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])$/.test(handle || '')) throw new Error('Handle: 3–30 lowercase letters, numbers or dashes')
+    const u = me()
+    if (Object.values(db.profiles).some((p) => p.id !== u.id && p.handle === handle)) throw new Error('That handle is taken')
+    Object.assign(u, { handle, headline, publicProof })
+    save()
+  },
+  async getProof(handle) {
+    await latency()
+    const p = Object.values(db.profiles).find((x) => x.handle === handle && x.publicProof)
+    if (!p) throw new Error('This page is private or doesn’t exist.')
+    const ms = db.contracts.filter((c) => c.freelancer?.id === p.id).flatMap((c) => c.milestones.map((m) => ({ ...m, clientId: c.client?.id })))
+    const paid = ms.filter((m) => (m.releasedCents || 0) > 0 && (m.status === 'released' || m.tranches?.length))
+    const verdictOf = (m) => [...m.submissions].sort((a, b) => b.attempt - a.attempt)[0]?.verdict
+    const firstTry = paid.filter((m) => m.submissions.find((s) => s.attempt === 1)?.verdict?.outcome === 'pass').length
+    return {
+      name: p.name, headline: p.headline, handle: p.handle,
+      stats: {
+        paidCents: paid.reduce((s, m) => s + m.releasedCents, 0), milestones: paid.length,
+        firstTryRate: paid.length ? firstTry / paid.length : null, clients: new Set(paid.map((m) => m.clientId)).size,
+        captures: paid.reduce((s, m) => s + (m.tranches?.length || 1), 0),
+      },
+      proofs: paid.sort((a, b) => (b.releasedAt || '').localeCompare(a.releasedAt || '')).slice(0, 12).map((m) => {
+        const results = verdictOf(m)?.results || []
+        const cap = m.tranches?.at(-1)?.captureId || m.paypal?.captureId || ''
+        return {
+          title: m.title, releasedCents: m.releasedCents, ofCents: m.amountCents, releasedAt: m.releasedAt || m.tranches?.at(-1)?.at,
+          checks: { passed: results.filter((r) => r.passed).length, total: results.length },
+          captures: m.tranches?.length || 1, capture: cap ? `•••${cap.slice(-6)}` : '', paidOut: m.payoutStatus === 'SUCCESS', attempts: m.submissions.length,
+        }
+      }),
+    }
   },
   async syncDisputes() {
     await latency()

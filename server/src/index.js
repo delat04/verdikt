@@ -13,6 +13,8 @@ import roomRoutes from './routes/room.js'
 import ledgerRoutes from './routes/ledger.js'
 import agentRoutes from './routes/agents.js'
 import mcpRoutes from './routes/mcp.js'
+import proofSettingsRoutes, { proofRoutes } from './routes/proof.js'
+import changeRoutes from './routes/changes.js'
 import { renewHolds, resumePayouts } from './lib/flow.js'
 import { syncDisputes } from './agent/defense.js'
 import { resumeVerifications } from './agent/verify.js'
@@ -53,9 +55,13 @@ await app.register(webhookRoutes, { prefix: '/api' })
 await app.register(disputeRoutes, { prefix: '/api' })
 await app.register(roomRoutes, { prefix: '/api' })
 await app.register(ledgerRoutes, { prefix: '/api' })
+await app.register(changeRoutes, { prefix: '/api' })
 await app.register(agentRoutes, { prefix: '/api' })
 // any AI agent can use Verdikt with a personal token: Streamable HTTP MCP at /mcp
 await app.register(mcpRoutes)
+// a freelancer's public proof of verified, PayPal-settled work (opt-in) and its badge
+await app.register(proofRoutes)
+await app.register(proofSettingsRoutes, { prefix: '/api' })
 
 // Deployed, the built web app ships in the same image (WEB_DIST): serve it, with long caching for the
 // hashed assets, and hand every other GET to the app's router so deep links like /contracts/:id work

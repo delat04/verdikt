@@ -29,6 +29,7 @@ async function call(path, { method = 'POST', body } = {}) {
 const person = (p) => (p ? { id: p.id, name: p.display_name || p.paypal_email || 'Member', email: p.email || '' } : null)
 const profileOf = (p, email) => p && ({
   id: p.id, name: p.display_name, email, intent: p.intent, paypalEmail: p.paypal_email || '', onboarded: !!p.onboarded_at,
+  handle: p.handle || '', headline: p.headline || '', publicProof: !!p.public_proof,
 })
 
 function mapContract(c) {
@@ -38,7 +39,7 @@ function mapContract(c) {
     fundedAt: m.funded_at, releasedAt: m.released_at, progress: m.progress || undefined,
     authorizedAt: m.authorized_at, holdExpiresAt: m.hold_expires_at, reauthorizedAt: m.reauthorized_at,
     releasedCents: m.released_cents, voidedCents: m.voided_cents, feeCents: m.fee_cents, payoutCents: m.payout_cents,
-    payoutEmail: m.payout_email, payoutStatus: m.payout_status, paidOutAt: m.paid_out_at,
+    payoutEmail: m.payout_email, payoutStatus: m.payout_status, paidOutAt: m.paid_out_at, tranches: m.tranches || [],
     paypal: {
       orderId: m.paypal_order_id, authorizationId: m.paypal_authorization_id, captureId: m.paypal_capture_id,
       payoutBatchId: m.paypal_payout_batch_id, payoutItemId: m.paypal_payout_item_id,
@@ -69,11 +70,16 @@ function mapContract(c) {
     }),
   }))
   return {
-    id: c.id, title: c.title, brief: c.brief, currency: c.currency, status: c.status,
+    id: c.id, title: c.title, brief: c.brief, currency: c.currency, status: c.status, releaseMode: c.release_mode || 'whole',
     inviteCode: c.invite_code, inviteEmail: c.invite_email || '', createdAt: c.created_at, createdBy: c.created_by,
     client: person(c.client), freelancer: person(c.freelancer),
     clientSignedAt: c.client_signed_at, freelancerSignedAt: c.freelancer_signed_at,
     milestones,
+    changes: (c.change_orders || []).map((x) => ({
+      id: x.id, requestedBy: x.requested_by, request: x.request, status: x.status, coveredBy: x.covered_by, reply: x.reply,
+      title: x.title, doneMeans: x.done_means || [], amountCents: x.amount_cents, dueDays: x.due_days, pricedBy: x.priced_by,
+      milestoneId: x.milestone_id, createdAt: x.created_at,
+    })),
     room: c.terms ? {
       terms: c.terms, clientV: c.terms_client_v, freelancerV: c.terms_freelancer_v, busy: !!c.mediator_busy,
       messages: [...(c.room_messages || [])].sort((a, b) => a.created_at.localeCompare(b.created_at)).map((x) => ({
@@ -90,7 +96,7 @@ const CONTRACT_SELECT = `
   *, client:profiles!contracts_client_id_fkey(id, display_name, paypal_email),
   freelancer:profiles!contracts_freelancer_id_fkey(id, display_name, paypal_email),
   milestones(*, criteria(*), appeals(*), disputes(*), submissions(*, verdicts(*, criterion_results(*)))),
-  room_messages(*)`
+  room_messages(*), change_orders(*)`
 
 export const live = {
   mode: 'live',
@@ -104,6 +110,7 @@ export const live = {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'disputes' }, fn)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_messages' }, fn)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'room_mandates' }, fn)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'change_orders' }, fn)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'audit_log' }, fn)
       .subscribe()
     const { data } = supabase.auth.onAuthStateChange(() => fn())
@@ -180,6 +187,7 @@ export const live = {
   // ---- terms
   updateCriteria: (milestoneId, criteria) => call(`/milestones/${milestoneId}/criteria`, { method: 'PUT', body: { criteria } }),
   signTerms: (contractId) => call(`/contracts/${contractId}/sign`),
+  setReleaseMode: (contractId, mode) => call(`/contracts/${contractId}/release-mode`, { method: 'PUT', body: { mode } }),
 
   // ---- escrow (PayPal Orders v2: AUTHORIZE → capture / void)
   createOrder: (milestoneId) => call(`/milestones/${milestoneId}/fund`),
@@ -195,6 +203,12 @@ export const live = {
   declineAppeal: (appealId) => call(`/appeals/${appealId}/decline`),
   syncDisputes: () => call('/disputes/sync'),
   askLedger: (question, columns) => call('/ledger/ask', { body: { question, columns } }),
+  requestChange: (contractId, request) => call(`/contracts/${contractId}/changes`, { body: { request } }),
+  acceptChange: (id) => call(`/changes/${id}/accept`),
+  counterChange: (id, body) => call(`/changes/${id}/counter`, { body }),
+  declineChange: (id) => call(`/changes/${id}/decline`),
+  getProof: (handle) => call(`/proof/${encodeURIComponent(handle)}`, { method: 'GET' }),
+  setProofSettings: (body) => call('/profile/proof', { method: 'PUT', body }),
   listAgentTokens: () => call('/agent-tokens', { method: 'GET' }),
   createAgentToken: (label) => call('/agent-tokens', { body: { label } }),
   revokeAgentToken: (id) => call(`/agent-tokens/${id}/revoke`),

@@ -1,6 +1,7 @@
 import { verifyWebhook } from '../lib/paypal.js'
 import { db, audit } from '../lib/supabase.js'
 import { syncDisputes } from '../agent/defense.js'
+import { settlePayout } from '../lib/flow.js'
 
 // PayPal events we mirror into the audit log (reference_id = milestone id)
 const TRACKED = new Set([
@@ -30,16 +31,11 @@ export default async function webhookRoutes(app) {
       return { ok: true }
     }
 
-    // payouts carry our milestone id as sender_item_id
+    // payouts: each released tranche has its own batch — settle the one this item belongs to
     if (event.event_type.startsWith('PAYMENT.PAYOUTS-ITEM.')) {
-      const milestoneId = event.resource?.payout_item?.sender_item_id
+      const batchId = event.resource?.payout_batch_id
       const status = event.resource?.transaction_status
-      if (milestoneId && status) {
-        await db().from('milestones').update({
-          payout_status: status, paypal_payout_item_id: event.resource.payout_item_id,
-          ...(status === 'SUCCESS' ? { paid_out_at: new Date().toISOString() } : {}),
-        }).eq('id', milestoneId)
-      }
+      if (batchId && status) await settlePayout(batchId, status, event.resource.payout_item_id)
       return { ok: true }
     }
 

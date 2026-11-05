@@ -120,6 +120,19 @@ export default async function contractRoutes(app) {
     return { ok: true }
   })
 
+  // ---- how money moves: the whole milestone on a pass, or check by check (part of the terms)
+  app.put('/contracts/:id/release-mode', async (request, reply) => {
+    const { data: c } = await db().from('contracts').select('*').eq('id', request.params.id).maybeSingle()
+    if (!c || ![c.client_id, c.freelancer_id].includes(request.user.id)) return reply.code(404).send({ error: 'Contract not found' })
+    const mode = request.body?.mode
+    if (!['whole', 'per_check'].includes(mode)) return reply.code(400).send({ error: 'Choose whole or per_check' })
+    if (c.client_signed_at && c.freelancer_signed_at) return reply.code(409).send({ error: 'Terms are signed by both parties and locked' })
+    if (mode === c.release_mode) return { ok: true }
+    await db().from('contracts').update({ release_mode: mode, client_signed_at: null, freelancer_signed_at: null }).eq('id', c.id)
+    await audit({ contractId: c.id, actor: c.client_id === request.user.id ? 'client' : 'freelancer', event: 'terms.release_mode', payload: { mode } })
+    return { ok: true }
+  })
+
   // ---- sign the terms (covers every milestone)
   app.post('/contracts/:id/sign', async (request, reply) => {
     const { data: c } = await db().from('contracts').select('*').eq('id', request.params.id).maybeSingle()

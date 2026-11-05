@@ -105,9 +105,9 @@ export function getAuthorization(authorizationId) {
  * Release: move held funds to the platform. With `amountCents` below the hold it's a partial release —
  * final_capture tells PayPal no more captures follow, so the rest of the hold goes back to the client.
  */
-export function captureAuthorization(authorizationId, { requestId, noteToPayer, amountCents, currency = 'USD' } = {}) {
+export function captureAuthorization(authorizationId, { requestId, noteToPayer, amountCents, currency = 'USD', finalCapture = true } = {}) {
   return call('POST', `/v2/payments/authorizations/${authorizationId}/capture`, {
-    final_capture: true,
+    final_capture: finalCapture,   // false keeps the authorization open for more partial captures
     note_to_payer: noteToPayer?.slice(0, 255),
     ...(amountCents ? { amount: { currency_code: currency, value: centsToValue(amountCents) } } : {}),
   }, { requestId })
