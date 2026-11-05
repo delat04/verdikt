@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Trial font used only to render the thumbnail locally — not licensed for redistribution
+thumbnail/font/

@@ -1,0 +1,19 @@
+{
+  "name": "verdikt-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.9"
+  },
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env --watch src/index.js",
+    "start": "node --env-file-if-exists=.env src/index.js",
+    "paypal:smoke": "node --env-file-if-exists=.env scripts/paypal-smoke.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.4.0",
+    "@supabase/supabase-js": "^2.119.0",
+    "fastify": "^5.12.8"
+  }
+}

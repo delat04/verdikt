@@ -1,0 +1,149 @@
+@import "tailwindcss";
+
+/*  ============================================
+    Verdikt Design Tokens
+    Structure from run-arrands (80% surface · 10% ink · 10% accent).
+    Accent: electric blue = trust. Green is reserved for verified / released.
+    Dark navy is the default theme; light is opt-in.
+    ============================================ */
+
+@theme {
+  --font-sans: 'Inter Tight Variable', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+}
+
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* --- Surfaces --- */
+  --bg:          #0B0F1A;   /* panels */
+  --bg-2:        #080B14;   /* the ground everything sits on */
+  --bg-3:        #151B2B;   /* hover / inset */
+
+  /* --- Ink / lines --- */
+  --ink:         #F1F4FA;
+  --muted:       #A3ABBD;
+  --faint:       #6B7488;
+  --line:        #1E2638;
+
+  /* --- Accent (electric blue) --- */
+  --accent:      #2F5BFF;
+  --accent-2:    #7C97FF;   /* accent as text on dark */
+  --accent-soft: rgba(47, 91, 255, 0.14);
+  --on-accent:   #FFFFFF;
+
+  /* --- Semantic --- */
+  --ok:          #3BE37A;
+  --ok-soft:     rgba(59, 227, 122, 0.12);
+  --warn:        #FFBE50;
+  --warn-soft:   rgba(255, 190, 80, 0.12);
+  --danger:      #FF5A5F;
+  --danger-soft: rgba(255, 90, 95, 0.12);
+
+  --shadow-pop:  0 12px 32px rgba(0, 0, 0, 0.6);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg:          #FFFFFF;
+  --bg-2:        #F7F9FC;
+  --bg-3:        #EEF2FF;
+  --ink:         #0F172A;
+  --muted:       #475569;
+  --faint:       #94A3B8;
+  --line:        #E2E8F0;
+  --accent:      #2F5BFF;
+  --accent-2:    #2546D8;
+  --accent-soft: #E6ECFF;
+  --on-accent:   #FFFFFF;
+  --ok:          #16A34A;
+  --ok-soft:     #DCFCE7;
+  --warn:        #D97706;
+  --warn-soft:   #FEF3C7;
+  --danger:      #DC2626;
+  --danger-soft: #FEE2E2;
+  --shadow-pop:  0 12px 32px rgba(15, 23, 42, 0.12);
+}
+
+:root {
+  --mono: var(--font-mono);
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 16px;
+}
+
+/* ---- Base resets ---- */
+html, body, #app { height: 100%; }
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: var(--ink);
+  background: var(--bg-2);
+  -webkit-font-smoothing: antialiased;
+  transition: background 0.2s, color 0.2s;
+}
+
+/* ---- Reusable atoms ---- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1.125rem;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  font: inherit;
+  font-weight: 500;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background 150ms, border-color 150ms, opacity 150ms;
+}
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.btn-primary { background: var(--accent); color: var(--on-accent); }
+.btn-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 85%, #000); }
+
+.btn-secondary { background: var(--bg); color: var(--ink); border-color: var(--line); }
+.btn-secondary:hover:not(:disabled) { background: var(--bg-3); }
+
+.btn-ok { background: var(--ok); color: #06210F; }
+.btn-danger { background: var(--danger); color: #fff; }
+
+.btn-icon {
+  width: 40px; height: 40px; padding: 0;
+  border-radius: 999px; background: transparent; border-color: var(--line); color: var(--muted);
+}
+.btn-icon:hover:not(:disabled) { background: var(--bg-3); color: var(--ink); }
+
+.card {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 1.25rem;
+}
+
+.input {
+  width: 100%;
+  padding: 0.625rem 0.75rem;
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  font: inherit;
+  font-size: 0.875rem;
+  outline: none;
+  transition: border-color 150ms;
+}
+.input:focus { border-color: var(--accent); }
+.input::placeholder { color: var(--faint); }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--faint);
+}
+
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
