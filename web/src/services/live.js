@@ -40,6 +40,13 @@ function mapContract(c) {
     authorizedAt: m.authorized_at, holdExpiresAt: m.hold_expires_at, reauthorizedAt: m.reauthorized_at,
     releasedCents: m.released_cents, voidedCents: m.voided_cents, feeCents: m.fee_cents, payoutCents: m.payout_cents,
     payoutEmail: m.payout_email, payoutStatus: m.payout_status, paidOutAt: m.paid_out_at, tranches: m.tranches || [],
+    expenseBudgetCents: m.expense_budget_cents || 0, expenseCovers: m.expense_covers || [],
+    expenses: [...(m.expenses || [])].sort((a, b) => a.created_at.localeCompare(b.created_at)).map((e) => ({
+      id: e.id, amountCents: e.amount_cents, merchant: e.merchant, purpose: e.purpose, receiptName: e.receipt_name, receiptType: e.receipt_type,
+      status: e.status, decidedBy: e.decided_by, note: e.note, tokens: e.tokens, checks: e.checks || [], extracted: e.extracted || {},
+      viaAgent: !!e.via_agent, captureId: e.paypal_capture_id, payoutStatus: e.payout_status, payoutEmail: e.payout_email,
+      paidOutAt: e.paid_out_at, createdAt: e.created_at, decidedAt: e.decided_at,
+    })),
     paypal: {
       orderId: m.paypal_order_id, authorizationId: m.paypal_authorization_id, captureId: m.paypal_capture_id,
       payoutBatchId: m.paypal_payout_batch_id, payoutItemId: m.paypal_payout_item_id,
@@ -54,7 +61,13 @@ function mapContract(c) {
       trace: d.agent_trace || [], createdAt: d.created_at, updatedAt: d.updated_at,
     })),
     criteria: [...(m.criteria || [])].sort((a, b) => a.position - b.position)
-      .map((cr) => ({ id: cr.id, position: cr.position, kind: cr.kind, statement: cr.statement, method: cr.method || '' })),
+      .map((cr) => ({
+        id: cr.id, position: cr.position, kind: cr.kind, statement: cr.statement, method: cr.method || '',
+        spec: Array.isArray(cr.check_spec?.probes) ? { probes: cr.check_spec.probes, sufficient: !!cr.check_spec.sufficient, by: cr.check_spec.by } : null,
+      })),
+    thread: [...(m.verifier_thread || [])].sort((a, b) => a.created_at.localeCompare(b.created_at)).map((t) => ({
+      id: t.id, author: t.author, viaAgent: !!t.via_agent, kind: t.kind, body: t.body, data: t.data || {}, createdAt: t.created_at,
+    })),
     submissions: [...(m.submissions || [])].sort((a, b) => a.attempt - b.attempt).map((s) => {
       const v = [...(s.verdicts || [])].sort((a, b) => b.created_at.localeCompare(a.created_at))[0]
       return {
@@ -62,8 +75,10 @@ function mapContract(c) {
         verdict: v ? {
           id: v.id, outcome: v.outcome, confidence: Number(v.confidence), summary: v.summary, createdAt: v.created_at,
           integrity: v.report?.tamper || null,
+          engine: v.report?.engine || null,
           results: (v.criterion_results || []).map((r) => ({
             criterionId: r.criterion_id, passed: r.passed, confidence: Number(r.confidence), explanation: r.explanation, evidence: r.evidence || [],
+            layer: r.layer || 'model', probes: r.probes || [],
           })),
         } : null,
       }
@@ -95,7 +110,9 @@ function mapContract(c) {
 const CONTRACT_SELECT = `
   *, client:profiles!contracts_client_id_fkey(id, display_name, paypal_email),
   freelancer:profiles!contracts_freelancer_id_fkey(id, display_name, paypal_email),
-  milestones(*, criteria(*), appeals(*), disputes(*), submissions(*, verdicts(*, criterion_results(*)))),
+  milestones(*, criteria(*), appeals(*), disputes(*), verifier_thread(*), submissions(*, verdicts(*, criterion_results(*))),
+    expenses(id, amount_cents, merchant, purpose, receipt_name, receipt_type, status, decided_by, note, tokens, checks, extracted, via_agent,
+      paypal_capture_id, payout_status, payout_email, paid_out_at, created_at, decided_at)),
   room_messages(*), change_orders(*)`
 
 export const live = {
@@ -111,6 +128,10 @@ export const live = {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_messages' }, fn)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'room_mandates' }, fn)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'change_orders' }, fn)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'verifier_thread' }, fn)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, fn)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, fn)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'job_applications' }, fn)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'audit_log' }, fn)
       .subscribe()
     const { data } = supabase.auth.onAuthStateChange(() => fn())
@@ -198,6 +219,27 @@ export const live = {
 
   // ---- delivery, appeals, disputes
   submitWork: (milestoneId, body) => call(`/milestones/${milestoneId}/submit`, { body }),
+  precheck: (milestoneId, body) => call(`/milestones/${milestoneId}/precheck`, { body }),
+  askVerifier: (milestoneId, question) => call(`/milestones/${milestoneId}/verifier/ask`, { body: { question } }),
+
+  // ---- jobs: find each other first; hiring opens a contract room
+  listJobs: () => call('/jobs', { method: 'GET' }),
+  postJob: (body) => call('/jobs', { body }),
+  applyToJob: (jobId, body) => call(`/jobs/${jobId}/apply`, { body }),
+  hireApplicant: (id) => call(`/applications/${id}/hire`),
+  declineApplicant: (id) => call(`/applications/${id}/decline`),
+  withdrawApplication: (id) => call(`/applications/${id}/withdraw`),
+  closeJob: (id) => call(`/jobs/${id}/close`),
+  priceCheck: (body) => call('/price-check', { body }),
+  scoutOpportunities: (skills) => call('/opportunities/scout', { body: { skills } }),
+
+  // ---- expenses: a budget agreed with the terms, reimbursed against receipts
+  setExpenseBudget: (milestoneId, { budgetCents, covers }) => call(`/milestones/${milestoneId}/expense-budget`, { method: 'PUT', body: { budgetCents, covers } }),
+  claimExpense: (milestoneId, body) => call(`/milestones/${milestoneId}/expenses`, { body }),
+  approveExpense: (id) => call(`/expenses/${id}/approve`),
+  declineExpense: (id, reason = '') => call(`/expenses/${id}/decline`, { body: { reason } }),
+  expenseReceipt: (id) => call(`/expenses/${id}/receipt`, { method: 'GET' }),
+  retryExpensePayout: (id) => call(`/expenses/${id}/payout`),
   appeal: (milestoneId, reason) => call(`/milestones/${milestoneId}/appeal`, { body: { reason } }),
   acceptAppeal: (appealId) => call(`/appeals/${appealId}/accept`),
   declineAppeal: (appealId) => call(`/appeals/${appealId}/decline`),

@@ -12,6 +12,7 @@ const routes = [
   { path: '/contracts', component: () => import('@/views/HomeView.vue') },
   { path: '/contracts/new', component: () => import('@/views/NewContractView.vue') },
   { path: '/contracts/:id', component: () => import('@/views/ContractView.vue'), props: true },
+  { path: '/jobs', component: () => import('@/views/JobsView.vue') },
   { path: '/ledger', component: () => import('@/views/LedgerView.vue') },
   { path: '/settings', component: () => import('@/views/SettingsView.vue') },
   { path: '/:pathMatch(.*)*', redirect: '/' },

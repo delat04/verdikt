@@ -6,6 +6,7 @@ import { db, audit } from '../lib/supabase.js'
 import { requireUser, milestoneFor } from '../lib/auth.js'
 import { draftInBackground } from '../lib/room.js'
 import { mediateSoon } from '../agent/mediator.js'
+import { compileInBackground } from '../agent/compile.js'
 
 const MAX_MILESTONES = 6
 const KINDS = ['visual', 'functional', 'code', 'performance', 'content']
@@ -117,6 +118,7 @@ export default async function contractRoutes(app) {
     })))
     await db().from('contracts').update({ client_signed_at: null, freelancer_signed_at: null }).eq('id', m.contract.id)
     await audit({ contractId: m.contract.id, milestoneId: m.id, actor: m.role, event: 'terms.edited', payload: { milestone: m.position } })
+    compileInBackground(m.contract.id)
     return { ok: true }
   })
 

@@ -67,12 +67,15 @@ export const STAGE = {
   passed:           { at: 88, label: 'Releasing',      tone: 'ok', live: true },
 }
 
+/* each check's state while the agent verifies; the '@' entry carries the stage and what decided each check */
+export const checkStates = (progress) => Object.entries(progress || {}).filter(([k]) => k !== '@').map(([, v]) => v)
+
 /* lane position (0–100) for a milestone, moving with the agent's progress while it verifies */
 export function stageAt(m) {
   const s = STAGE[m?.status]
   if (!s) return 0
   if (!s.to || !m.progress) return s.at
-  const states = Object.values(m.progress)
+  const states = checkStates(m.progress)
   const done = states.filter((x) => x === 'pass' || x === 'fail').length
   return s.at + (s.to - s.at) * (done / Math.max(1, states.length))
 }
@@ -103,7 +106,9 @@ export function contractTotals(contract) {
   return {
     total: sum(ms),
     // check by check, part of a held milestone may already be released: held is what's left
-    held: ms.filter((m) => HELD.includes(m.status)).reduce((s, m) => s + m.amountCents - (m.releasedCents || 0), 0),
+    // …plus what's left of its expense budget, which sits in the same PayPal hold
+    held: ms.filter((m) => HELD.includes(m.status)).reduce((s, m) => s + m.amountCents - (m.releasedCents || 0) + (m.expenseBudgetCents || 0)
+      - (m.expenses || []).filter((e) => e.captureId).reduce((t, e) => t + e.amountCents, 0), 0),
     // a partial release counts what was actually captured, not the milestone amount
     released: ms.reduce((s, m) => s + (m.status === 'released' ? (m.releasedCents ?? m.amountCents) : (m.releasedCents || 0)), 0),
     releasedCount: ms.filter((m) => m.status === 'released').length,
@@ -154,6 +159,22 @@ export const PAYOUT = {
  *   actor:  'you' | 'them' | 'agent' | 'none' — who the contract is waiting on
  */
 export function nextStep(contract, role) {
+  const step = baseStep(contract, role)
+  // an expense claim the checks couldn't settle waits on the client — asked only when nothing bigger is
+  if (role !== 'client' || !step || step.actor === 'you') return step
+  const ms = contract.milestones.find((x) => x.expenses?.some((e) => e.status === 'needs_client'))
+  const e = ms?.expenses.find((x) => x.status === 'needs_client')
+  if (!e) return step
+  const other = counterparty(contract, role)
+  return {
+    key: 'expense', tone: 'accent', eyebrow: `M${ms.position} · Expenses`, actor: 'you', action: 'expenses', milestoneId: ms.id,
+    short: `Decide a ${money(e.amountCents, contract.currency)} expense`,
+    title: `${other ? firstName(other.name) : 'The freelancer'} claimed ${money(e.amountCents, contract.currency)} the checks couldn't settle`,
+    sub: `${e.merchant || 'A receipt'}${e.purpose ? ` — ${e.purpose}` : ''}. Look at the receipt and reimburse or decline it; it's within the expense budget you agreed.`,
+  }
+}
+
+function baseStep(contract, role) {
   if (!contract) return null
   const other = counterparty(contract, role)
   const otherName = other ? firstName(other.name) : role === 'client' ? 'the freelancer' : 'the client'
@@ -161,6 +182,9 @@ export function nextStep(contract, role) {
   const mLabel = m ? `M${m.position} · ${m.title}` : ''
   const amount = m ? money(m.amountCents, contract.currency) : ''
   const whole = m ? money(m.amountCents, contract.currency, { whole: true }) : ''
+  // the client funds the work and its expense budget in one hold
+  const hold = m ? money(m.amountCents + (m.expenseBudgetCents || 0), contract.currency) : ''
+  const holdWhole = m ? money(m.amountCents + (m.expenseBudgetCents || 0), contract.currency, { whole: true }) : ''
   const mTag = m ? `M${m.position}` : ''
 
   if (contract.status === 'cancelled') {
@@ -233,8 +257,8 @@ export function nextStep(contract, role) {
     case 'draft':
     case 'awaiting_funding':
       return role === 'client'
-        ? { key: 'fund', tone: 'accent', eyebrow: mLabel, actor: 'you', action: 'fund', milestoneId: m.id, short: `Fund ${whole}`,
-            title: `Fund ${amount} into escrow`, sub: 'PayPal holds it. You are charged only when the work passes the checks you signed.' }
+        ? { key: 'fund', tone: 'accent', eyebrow: mLabel, actor: 'you', action: 'fund', milestoneId: m.id, short: `Fund ${holdWhole}`,
+            title: `Fund ${hold} into escrow`, sub: `PayPal holds it. You are charged only when the work passes the checks you signed${m.expenseBudgetCents ? ', and for expenses only against receipts' : ''}.` }
         : { key: 'fund-wait', tone: 'neutral', eyebrow: mLabel, actor: 'them', milestoneId: m.id, short: `${otherName} to fund ${mTag}`,
             title: `Waiting for ${otherName} to fund ${amount}`, sub: 'Start once the money is held — it shows here the moment it is.' }
     case 'funded':

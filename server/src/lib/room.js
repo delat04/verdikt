@@ -5,6 +5,7 @@
 
 import { db, audit } from './supabase.js'
 import { draftCriteria, fallbackCriteria } from '../agent/draft.js'
+import { compileInBackground } from '../agent/compile.js'
 
 const KINDS = ['visual', 'functional', 'code', 'performance', 'content']
 
@@ -23,6 +24,8 @@ export async function draftInBackground(contract, milestones) {
   await db().from('criteria').insert(rows)
   await db().from('contracts').update({ status: 'negotiating' }).eq('id', contract.id)
   await audit({ contractId: contract.id, actor: 'agent', event: 'terms.drafted', payload: { criteria: rows.length } })
+  // each check becomes probes both parties can see before they sign
+  compileInBackground(contract.id)
 }
 
 export class RoomError extends Error {

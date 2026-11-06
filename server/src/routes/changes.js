@@ -11,6 +11,7 @@ import { db, audit } from '../lib/supabase.js'
 import { requireUser } from '../lib/auth.js'
 import { callTool } from '../agent/claude.js'
 import { money } from '../lib/money.js'
+import { compileInBackground } from '../agent/compile.js'
 
 const SYSTEM = `You guard a signed freelance software contract against scope creep, neutrally for both sides.
 Given the signed terms (brief, scope, out-of-scope, milestones with their testable checks) and a new request,
@@ -148,6 +149,7 @@ export default async function changeRoutes(app) {
       statement: d.replace(/\.$/, ''), method: 'Agreed as a change order; checked against the live URL and repository.',
     })))
     await db().from('change_orders').update({ status: 'accepted', milestone_id: m.id, decided_at: new Date().toISOString() }).eq('id', ch.id)
+    compileInBackground(c.id)
     if (c.status === 'completed') await db().from('contracts').update({ status: 'active' }).eq('id', c.id)
     await audit({ contractId: c.id, milestoneId: m.id, actor: role, event: 'change.accepted', payload: { amountCents: ch.amount_cents, title: ch.title, position: m.position } })
     return { ok: true, milestoneId: m.id }

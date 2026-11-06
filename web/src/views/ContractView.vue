@@ -29,6 +29,8 @@ import StageTrack from '@/components/StageTrack.vue'
 import CriteriaEditor from '@/components/CriteriaEditor.vue'
 import VerdictReport from '@/components/VerdictReport.vue'
 import SubmitWork from '@/components/SubmitWork.vue'
+import VerifierThread from '@/components/VerifierThread.vue'
+import ExpenseBudget from '@/components/ExpenseBudget.vue'
 import FundModal from '@/components/FundModal.vue'
 import ActivityFeed from '@/components/ActivityFeed.vue'
 import ContractRoom from '@/components/ContractRoom.vue'
@@ -44,6 +46,7 @@ import { money, dueLabel, shortDate, timeAgo, firstName, toCents, split, FEE_PER
 import {
   nextStep, roleOf, counterparty, currentMilestone, contractTotals, termsSigned, latestSubmission, latestAppeal, holdHealth, PAYOUT,
 } from '@/domain/milestone'
+import { expenseTotals, holdCents } from '@/domain/expenses'
 
 const props = defineProps({ id: { type: String, required: true } })
 const auth = useAuthStore()
@@ -98,11 +101,15 @@ watch(() => ms.value?.status, (s, prev) => {
   if (prev && s !== prev && ['submitted', 'verifying', 'funded', 'released', 'failed'].includes(s)) tab.value = suggestedTab(ms.value)
 })
 watch(signed, (s, was) => { if (s && !was) tab.value = suggestedTab(ms.value) })
+// expenses show when there's a budget, or while the terms can still get one
+const showExpenses = computed(() => !!ms.value && (ms.value.expenseBudgetCents > 0 || ms.value.expenses?.length > 0 || canEditTerms.value))
 const tabs = computed(() => [
   { value: 'checks', label: 'Checks', count: ms.value?.criteria.length || null },
   { value: 'delivery', label: 'Delivery', count: ms.value?.submissions.length || null },
+  ...(showExpenses.value ? [{ value: 'expenses', label: 'Expenses', count: ms.value.expenses?.length || null }] : []),
   { value: 'payment', label: 'Payment' },
 ])
+const spend = computed(() => expenseTotals(ms.value))
 
 // ---- actions
 const modal = ref('')            // invite | sign | fund | release | refund | appeal
@@ -127,6 +134,7 @@ function act(action) {
   if (action === 'invite') modal.value = 'invite'
   else if (action === 'sign') { selectedId.value = current.value?.id || selectedId.value; modal.value = 'sign' }
   else if (action === 'fund') { selectedId.value = step.value.milestoneId; modal.value = 'fund' }
+  else if (action === 'expenses') { selectedId.value = step.value.milestoneId; setTimeout(() => { tab.value = 'expenses' }, 0) }
   else if (action === 'submit' || action === 'resubmit' || action === 'review') {
     selectedId.value = step.value.milestoneId
     tab.value = 'delivery'
@@ -221,6 +229,8 @@ const criteriaCount = computed(() => contract.value?.milestones.reduce((s, m) =>
 const mySignature = computed(() => contract.value && (role.value === 'client' ? contract.value.clientSignedAt : contract.value.freelancerSignedAt))
 const canEditTerms = computed(() => !!contract.value && !signed.value && !drafting.value && !!role.value)
 const canSubmit = computed(() => role.value === 'freelancer' && ms.value && current.value?.id === ms.value.id && ['funded', 'failed'].includes(ms.value.status))
+// signing (or a settled milestone with no claims) hides the Expenses tab: don't leave it open on nothing
+watch(showExpenses, (on) => { if (!on && tab.value === 'expenses') tab.value = suggestedTab(ms.value) })
 </script>
 
 <template>
@@ -297,6 +307,7 @@ const canSubmit = computed(() => role.value === 'freelancer' && ms.value && curr
                 </div>
                 <div class="ms__right">
                   <p class="ms__amount vk-num">{{ money(ms.amountCents, contract.currency) }}</p>
+                  <p v-if="ms.expenseBudgetCents" class="ms__xp vk-num">+ up to {{ money(ms.expenseBudgetCents, contract.currency, { whole: true }) }} expenses</p>
                   <StatusPill v-if="signed || ms.status !== 'draft'" :status="ms.status" />
                   <VPill v-else size="md" outline>{{ drafting ? 'Drafting checks' : 'Awaiting signatures' }}</VPill>
                 </div>
@@ -459,6 +470,13 @@ const canSubmit = computed(() => role.value === 'freelancer' && ms.value && curr
                   <VerdictReport :criteria="ms.criteria" :submission="s" />
                 </div>
               </details>
+
+              <VerifierThread v-if="signed && ms.criteria.length && role" :milestone="ms" :contract="contract" :role="role" />
+            </div>
+
+            <!-- expenses: a budget held with the milestone, reimbursed against receipts -->
+            <div v-else-if="tab === 'expenses'" class="panel">
+              <ExpenseBudget :milestone="ms" :contract="contract" :role="role" :editable="canEditTerms" />
             </div>
 
             <!-- payment -->
@@ -478,6 +496,11 @@ const canSubmit = computed(() => role.value === 'freelancer' && ms.value && curr
 
               <dl class="vk-kv pay">
                 <div class="vk-kv__row"><dt class="vk-kv__k">Amount</dt><dd class="vk-kv__v">{{ money(ms.amountCents, contract.currency) }}</dd></div>
+                <div v-if="ms.expenseBudgetCents" class="vk-kv__row">
+                  <dt class="vk-kv__k">Expense budget</dt>
+                  <dd class="vk-kv__v">up to {{ money(ms.expenseBudgetCents, contract.currency) }}<template v-if="spend.spent"> · {{ money(spend.spent, contract.currency) }} reimbursed, no fee</template> · <button type="button" class="kv-link" @click="tab = 'expenses'">see claims</button></dd>
+                </div>
+                <div v-if="ms.expenseBudgetCents && ms.paypal?.authorizationId" class="vk-kv__row"><dt class="vk-kv__k">PayPal hold</dt><dd class="vk-kv__v">{{ money(holdCents(ms), contract.currency) }} — the work and the expense budget, one authorization</dd></div>
                 <div class="vk-kv__row"><dt class="vk-kv__k">Status</dt><dd class="vk-kv__v"><StatusPill :status="ms.status" size="sm" /></dd></div>
                 <div v-if="ms.fundedAt" class="vk-kv__row"><dt class="vk-kv__k">Held since</dt><dd class="vk-kv__v">{{ shortDate(ms.fundedAt) }} · {{ timeAgo(ms.fundedAt) }}</dd></div>
                 <div v-if="!ms.releasedAt && ms.releasedCents" class="vk-kv__row"><dt class="vk-kv__k">Released so far</dt><dd class="vk-kv__v">{{ money(ms.releasedCents, contract.currency) }} of {{ money(ms.amountCents, contract.currency) }} · the rest stays held</dd></div>
@@ -509,7 +532,7 @@ const canSubmit = computed(() => role.value === 'freelancer' && ms.value && curr
                 </ol>
               </div>
               <div v-if="role === 'client' && current?.id === ms.id && ['awaiting_funding', 'draft'].includes(ms.status) && signed" class="pay__cta">
-                <VButton :icon="Wallet" @click="modal = 'fund'">Fund {{ money(ms.amountCents, contract.currency) }} with PayPal</VButton>
+                <VButton :icon="Wallet" @click="modal = 'fund'">Fund {{ money(holdCents(ms), contract.currency) }} with PayPal</VButton>
               </div>
               <div v-if="ms.status === 'released'" class="pay__disputes">
                 <p class="vk-faint">If the buyer opens a PayPal dispute on this payment, the agent answers it with the signed checks and the evidence.</p>
@@ -669,6 +692,9 @@ const canSubmit = computed(() => role.value === 'freelancer' && ms.value && curr
 .ms__desc { margin: 4px 0 0; font: var(--vk-type-dense); color: var(--vk-muted); }
 .ms__right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .ms__amount { margin: 0; font: var(--vk-num-18); }
+.ms__xp { margin: -6px 0 0; font-size: 12px; color: var(--vk-muted); white-space: nowrap; }
+.kv-link { padding: 0; border: 0; background: none; font: inherit; color: var(--vk-accent-text); cursor: pointer; }
+.kv-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .ms__track { margin: 6px 0 26px; }
 .ms__meter { margin: -10px 0 24px; }
 .mode { display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap; margin-top: 22px; padding: 14px 16px; border: 1px solid var(--vk-line); border-radius: var(--vk-r-md); background: var(--vk-surface-2); }

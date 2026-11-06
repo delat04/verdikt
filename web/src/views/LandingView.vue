@@ -24,14 +24,14 @@ const checks = [
 const agents = [
   { icon: MessagesSquare, title: 'A mediator in the room', text: 'After every message it updates a versioned terms sheet, proposes fair trades when price and scope don’t meet, and names the question that blocks agreement.' },
   { icon: Bot, title: 'An agent that bargains for you', text: 'Give it a private mandate — your price limit, your deadline, your must-haves. It negotiates, never reveals them, and accepts only terms that fit. The limits are enforced in code.' },
-  { icon: Plug, title: 'Any AI agent can hire', text: 'Claude Desktop, Claude Code or any MCP client connects with a personal token: open a room, negotiate, fund, deliver, read the verdict — 13 tools.' },
+  { icon: Plug, title: 'Any AI agent can hire — or get hired', text: 'Claude Code or any MCP client connects with a personal token. It can price a job from live web prices, post it or apply to one, rank applicants, hire into a contract room — or, as a coding agent, run the signed checks as a test suite, deliver and claim expenses with receipts. 27 tools.' },
   { icon: ShieldCheck, title: 'Money still needs a person', text: 'An agent can agree terms and create the PayPal hold link. Only the client approves the hold, and only passing checks release it.' },
 ]
 
 const steps = [
   { icon: PenLine, title: 'Agree the terms together', text: 'Talk it through in a contract room. A neutral AI mediator keeps a versioned terms sheet and turns wishes into checks it can test.' },
   { icon: Wallet, title: 'PayPal holds the money', text: 'The client funds each milestone with a PayPal authorization — a hold, not a charge.' },
-  { icon: ScanSearch, title: 'The agent checks the delivery', text: 'It opens the live site at desktop and mobile sizes, runs each check, reads the repo, and keeps the evidence.' },
+  { icon: ScanSearch, title: 'Probes check the delivery', text: 'Each signed check compiles into deterministic probes — layout at 375px, exact copy, accessibility, the repo. Most checks are settled with no model call; Claude judges only the rest.' },
   { icon: Banknote, title: 'Proven → released', text: 'Every check passes: PayPal captures and the freelancer is paid. Or check by check — each passing check releases its share. Not yet: it stays held, and both sides see why.' },
 ]
 </script>

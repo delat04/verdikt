@@ -15,6 +15,9 @@ import agentRoutes from './routes/agents.js'
 import mcpRoutes from './routes/mcp.js'
 import proofSettingsRoutes, { proofRoutes } from './routes/proof.js'
 import changeRoutes from './routes/changes.js'
+import verifierRoutes from './routes/verifier.js'
+import expenseRoutes, { resumeExpenses } from './routes/expenses.js'
+import jobRoutes from './routes/jobs.js'
 import { renewHolds, resumePayouts } from './lib/flow.js'
 import { syncDisputes } from './agent/defense.js'
 import { resumeVerifications } from './agent/verify.js'
@@ -56,6 +59,9 @@ await app.register(disputeRoutes, { prefix: '/api' })
 await app.register(roomRoutes, { prefix: '/api' })
 await app.register(ledgerRoutes, { prefix: '/api' })
 await app.register(changeRoutes, { prefix: '/api' })
+await app.register(verifierRoutes, { prefix: '/api' })
+await app.register(expenseRoutes, { prefix: '/api' })
+await app.register(jobRoutes, { prefix: '/api' })
 await app.register(agentRoutes, { prefix: '/api' })
 // any AI agent can use Verdikt with a personal token: Streamable HTTP MCP at /mcp
 await app.register(mcpRoutes)
@@ -91,7 +97,7 @@ const every = (ms, fn, label) => {
 every(30 * 60_000, renewHolds, 'hold renewal')
 every(10 * 60_000, syncDisputes, 'dispute sync')
 
-// Work that a restart interrupted picks up where it left off: checks, second reviews, payouts in flight
-Promise.all([resumeVerifications(), resumeAppeals(), resumePayouts(), resumeRooms()])
+// Work that a restart interrupted picks up where it left off: checks, second reviews, payouts in flight, expense claims
+Promise.all([resumeVerifications(), resumeAppeals(), resumePayouts(), resumeRooms(), resumeExpenses()])
   .then(([v, a, p]) => { if (v + a + p) app.log.info({ verifications: v, appeals: a, payouts: p }, 'resumed interrupted work') })
   .catch((e) => app.log.warn({ err: e.message }, 'resume failed'))

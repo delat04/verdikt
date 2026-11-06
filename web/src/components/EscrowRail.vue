@@ -13,7 +13,7 @@
 import { computed } from 'vue'
 import { Check, Wallet, Hammer, ScanSearch, X, Scale, Banknote, Send, Undo2 } from 'lucide-vue-next'
 import { vGlide } from '@/directives/glide'
-import { STAGE, LANE, STATUS, stageAt, latestSubmission } from '@/domain/milestone'
+import { STAGE, LANE, STATUS, stageAt, latestSubmission, checkStates } from '@/domain/milestone'
 import { money, shortDate, dueLabel } from '@/domain/format'
 
 const props = defineProps({
@@ -34,7 +34,7 @@ const ICON = { draft: Wallet, awaiting_funding: Wallet, funded: Hammer, submitte
 function liveNote(m) {
   const v = latestSubmission(m)?.verdict
   if (m.status === 'verifying' && m.progress) {
-    const states = Object.values(m.progress)
+    const states = checkStates(m.progress)
     const done = states.filter((x) => x === 'pass' || x === 'fail').length
     return `${done} of ${states.length} checked`
   }

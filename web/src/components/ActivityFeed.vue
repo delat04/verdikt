@@ -13,8 +13,16 @@ const props = defineProps({
   showContract: { type: Boolean, default: false },   // cross-contract feeds name the contract
 })
 
+// "· 5 by probes, 1 by Claude" — what decided the verdict, when the engine recorded it
+const decidedBy = (p) => {
+  const d = p.decided
+  if (!d) return ''
+  const parts = [(d.probe || 0) + (d.ocr || 0) && `${(d.probe || 0) + (d.ocr || 0)} by probes`, d.reused && `${d.reused} unchanged`, d.model && `${d.model} by Claude`].filter(Boolean)
+  return parts.length ? ` · ${parts.join(', ')}` : ''
+}
 const LABEL = {
   'contract.created': () => 'Contract created',
+  'job.hired': (p) => `Hired ${p.name || 'a freelancer'} from the job post — ${money(p.priceCents)}${p.days ? ` in ${p.days} days` : ''}`,
   'room.opened': () => 'Opened the contract room',
   'change.requested': (p) => `Asked for a change: “${p.request || ''}”`,
   'change.in_scope': () => 'Agent: already covered by the signed terms — no extra charge',
@@ -35,6 +43,8 @@ const LABEL = {
   'contract.active': () => 'Both parties signed — contract active',
   'contract.completed': () => 'Final milestone paid — contract complete',
   'terms.drafted': () => 'Agent drafted the acceptance criteria',
+  'checks.compiled': (p) => `Checks compiled into ${p.probes} deterministic probe${p.probes === 1 ? '' : 's'}`,
+  'checks.compile_failed': () => 'Checks compiled by rules (the agent was unavailable)',
   'terms.edited': (p) => `Checks edited on M${p.milestone} — signatures reset`,
   'terms.signed': () => 'Signed the terms',
   'escrow.order_created': () => 'PayPal order created',
@@ -44,7 +54,18 @@ const LABEL = {
   'escrow.partially_released': (p) => `${money(p.amountCents)} of ${money(p.ofCents)} released — ${money(p.returnedCents)} returned to the client`,
   'escrow.hold_renewed': () => 'PayPal hold renewed — the funds stay guaranteed',
   'escrow.renew_failed': () => 'PayPal would not renew the hold yet',
-  'payout.sent': (p) => `${money(p.amountCents)} sent to the freelancer's PayPal${p.feeCents ? ` (fee ${money(p.feeCents)})` : ''}`,
+  'terms.expense_budget': (p) => (p.budgetCents ? `Expense budget on M${p.milestone}: up to ${money(p.budgetCents)} for ${(p.covers || []).join(', ')} — signatures reset` : `Expense budget removed from M${p.milestone} — signatures reset`),
+  'expense.claimed': (p) => `${p.viaAgent ? 'Agent claimed' : 'Claimed'} ${money(p.amountCents)} for ${p.merchant || 'an expense'}`,
+  'expense.checked': (p) => ({
+    approved: `Receipt passed every check${p.by === 'claude' ? ' (coverage read by Claude)' : ' — decided by rules, no model'}`,
+    rejected: `Receipt for ${money(p.amountCents)} failed ${p.failed} check${p.failed === 1 ? '' : 's'} — not reimbursed`,
+    needs_client: `The checks couldn't settle the ${money(p.amountCents)} receipt — the client decides`,
+  }[p.outcome] || 'Receipt checked'),
+  'expense.reimbursed': (p) => `${money(p.amountCents)} reimbursed for ${p.merchant || 'an expense'} — PayPal captured it from the hold${p.by === 'client' ? ' (approved by the client)' : ''}`,
+  'expense.declined': (p) => `Declined the ${money(p.amountCents)} claim for ${p.merchant || 'an expense'}`,
+  'expense.expired': (p) => `${p.count} expense claim${p.count === 1 ? '' : 's'} closed — the milestone settled first`,
+  'expense.capture_failed': () => 'PayPal did not capture an approved expense — the client can retry',
+  'payout.sent': (p) => `${money(p.amountCents)} sent to the freelancer's PayPal${p.expenseId ? ' (reimbursement, no fee)' : p.feeCents ? ` (fee ${money(p.feeCents)})` : ''}`,
   'payout.completed': (p) => `${money(p.amountCents)} landed in the freelancer's PayPal`,
   'payout.failed': (p) => `Payout didn't go through${p.status ? ` (${p.status.toLowerCase()})` : ''}`,
   'payout.needs_email': () => 'Payout waiting for the freelancer\'s PayPal email',
@@ -59,8 +80,8 @@ const LABEL = {
   'dispute.error': () => 'The dispute answer could not be sent to PayPal',
   'work.submitted': (p) => `Work delivered · attempt ${p.attempt}`,
   'verify.started': () => 'Agent started checking',
-  'verify.passed': (p) => `All ${p.total} checks passed`,
-  'verify.failed': (p) => (p.tampered ? 'Verdict failed on integrity — funds held' : `${p.failed} of ${p.total} checks failed — funds held`),
+  'verify.passed': (p) => `All ${p.total} checks passed${decidedBy(p)}`,
+  'verify.failed': (p) => (p.tampered ? 'Verdict failed on integrity — funds held' : `${p.failed} of ${p.total} checks failed — funds held${decidedBy(p)}`),
   'verdict.appealed': () => 'Verdict appealed — funds stay held for review',
   'verify.error': () => 'The check could not finish — funds stay held',
   'escrow.capture_failed': () => 'PayPal capture failed — the client can release by hand',
@@ -70,7 +91,8 @@ const LABEL = {
 const WHO = { client: 'Client', freelancer: 'Freelancer', agent: 'Agent', paypal: 'PayPal', system: 'Verdikt' }
 // the dot says who acted; green only when money moved
 const TONE = {
-  'escrow.released': 'ok', 'escrow.partially_released': 'ok', 'payout.completed': 'ok', 'verify.passed': 'ok',
+  'escrow.released': 'ok', 'escrow.partially_released': 'ok', 'payout.completed': 'ok', 'verify.passed': 'ok', 'expense.reimbursed': 'ok',
+  'expense.capture_failed': 'danger',
   'verify.failed': 'danger', 'verify.tamper': 'danger', 'payout.failed': 'danger', 'dispute.opened': 'danger', 'escrow.refunded': 'neutral',
 }
 

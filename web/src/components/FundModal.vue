@@ -5,12 +5,13 @@
 -->
 <script setup>
 import { ref, watch, nextTick } from 'vue'
-import { ShieldCheck, Undo2, CalendarClock, Banknote } from 'lucide-vue-next'
+import { ShieldCheck, Undo2, CalendarClock, Banknote, Receipt } from 'lucide-vue-next'
 import VModal from './ui/VModal.vue'
 import VButton from './ui/VButton.vue'
 import { api, isDemo } from '@/services'
 import { money, split, FEE_PERCENT } from '@/domain/format'
 import { toast } from '@/composables/useToast'
+import { holdCents } from '@/domain/expenses'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -67,7 +68,7 @@ async function renderButtons() {
     if (message.value && paypal.Messages) {
       message.value.innerHTML = ''
       paypal.Messages({
-        amount: props.milestone.amountCents / 100,
+        amount: holdCents(props.milestone) / 100,
         placement: 'payment',
         style: { layout: 'text', logo: { type: 'inline' }, text: { size: 12, color: dark() ? 'white' : 'black' } },
       }).render(message.value).catch(() => {})
@@ -97,7 +98,7 @@ async function approveDemo() {
 }
 
 function done() {
-  toast(`${money(props.milestone.amountCents, props.currency)} is held in escrow`, { tone: 'ok' })
+  toast(`${money(holdCents(props.milestone), props.currency)} is held in escrow`, { tone: 'ok' })
   emit('funded')
   emit('close')
 }
@@ -106,11 +107,13 @@ function done() {
 <template>
   <VModal :open="open" :title="milestone ? `Fund M${milestone.position} · ${milestone.title}` : ''" sub="A hold, not a payment." @close="!busy && emit('close')">
     <div v-if="milestone" class="fund">
-      <p class="fund__amount vk-num">{{ money(milestone.amountCents, currency) }}</p>
+      <p class="fund__amount vk-num">{{ money(holdCents(milestone), currency) }}</p>
+      <p v-if="milestone.expenseBudgetCents" class="fund__split vk-num">{{ money(milestone.amountCents, currency) }} for the work + up to {{ money(milestone.expenseBudgetCents, currency) }} expense budget</p>
       <ul class="fund__facts">
         <li><ShieldCheck :size="16" :stroke-width="1.9" /> PayPal holds the money. Nobody can touch it until the checks you signed pass.</li>
         <li><Undo2 :size="16" :stroke-width="1.9" /> If the work never passes, the hold is voided and you are not charged.</li>
         <li><CalendarClock :size="16" :stroke-width="1.9" /> PayPal keeps a hold valid for up to 29 days, and Verdikt renews it after the first 3 so it stays guaranteed while the work is built.</li>
+        <li v-if="milestone.expenseBudgetCents"><Receipt :size="16" :stroke-width="1.9" /> The expense budget ({{ (milestone.expenseCovers || []).join(', ') }}) is paid out only against receipts that pass the checks. You're never charged for what isn't spent.</li>
         <li v-if="FEE_PERCENT"><Banknote :size="16" :stroke-width="1.9" /> When it's released, the freelancer receives <span class="vk-num">{{ money(split(milestone.amountCents).net, currency) }}</span> in their PayPal — Verdikt keeps {{ FEE_PERCENT }}%. You pay nothing extra.</li>
       </ul>
 
@@ -121,7 +124,7 @@ function done() {
           <span class="vk-eyebrow">Sandbox · simulated in demo</span>
         </div>
         <div class="pp__row"><span class="vk-muted">Pay with</span><span class="vk-num">{{ payerEmail || 'sandbox-buyer@personal.example' }}</span></div>
-        <div class="pp__row"><span class="vk-muted">Authorize</span><span class="vk-num">{{ money(milestone.amountCents, currency) }}</span></div>
+        <div class="pp__row"><span class="vk-muted">Authorize</span><span class="vk-num">{{ money(holdCents(milestone), currency) }}</span></div>
         <VButton block size="lg" :loading="busy" @click="approveDemo">Approve hold</VButton>
       </div>
 
@@ -138,6 +141,7 @@ function done() {
 </template>
 
 <style scoped>
+.fund__split { margin: -8px 0 0; font-size: 12px; color: var(--vk-muted); }
 .fund__amount { margin: 0; font: var(--vk-num-40); letter-spacing: -.02em; }
 .fund__facts { margin: 16px 0 20px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
 .fund__facts li { display: flex; gap: 10px; font: var(--vk-type-dense); color: var(--vk-ink-2); }

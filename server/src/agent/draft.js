@@ -14,7 +14,10 @@ Write criteria that:
 - are objective and checkable with that evidence — never taste ("looks modern", "feels premium");
 - come straight from the brief and the milestone; don't invent scope the client didn't ask for;
 - are each one sentence, specific, and phrased as a fact that is true when the work is done;
-- cover what matters for that milestone: usually 4-6 criteria spanning functional, visual, content, performance and code.
+- cover what matters for that milestone: usually 4-6 criteria spanning functional, visual, content, performance and code;
+- where the brief allows, are decidable by a deterministic probe with no judgment: exact copy in quotes ("Order online"),
+  sizes in px ("No horizontal scrolling at 375px"), times in seconds ("Largest Contentful Paint under 2.5 s"), file and
+  script names ("The repository has a README and a build script"). Keep a judgment check only where the brief needs one.
 
 For each criterion, also say how the verifier checks it, in one plain sentence a non-technical client understands.
 Both parties will read and sign these before money is held, so prefer clarity over cleverness.`

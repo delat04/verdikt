@@ -12,6 +12,7 @@ import * as paypal from '../lib/paypal.js'
 import { db, audit } from '../lib/supabase.js'
 import { requireUser, milestoneFor } from '../lib/auth.js'
 import { release, refund, payout } from '../lib/flow.js'
+import { money } from '../lib/money.js'
 
 export default async function escrowRoutes(app) {
   app.addHook('preHandler', requireUser)
@@ -21,11 +22,13 @@ export default async function escrowRoutes(app) {
     if (!m) return
     if (m.status !== 'awaiting_funding') return reply.code(409).send({ error: m.status === 'draft' ? 'Sign the terms and finish earlier milestones first' : `Milestone is ${m.status}` })
 
+    // one hold for the work and its expense budget; what the budget doesn't spend is never charged
+    const budget = m.expense_budget_cents || 0
     const order = await paypal.createAuthorizeOrder({
-      amountCents: m.amount_cents,
+      amountCents: m.amount_cents + budget,
       currency: m.contract.currency,
       referenceId: m.id,
-      description: `${m.contract.title} — M${m.position} ${m.title}`,
+      description: `${m.contract.title} — M${m.position} ${m.title}${budget ? ` + up to ${money(budget, m.contract.currency)} expenses` : ''}`,
       requestId: `fund-${m.id}-${Date.now()}`,
       returnUrl: `${config.appUrl}/contracts/${m.contract.id}?paypal=approved&milestone=${m.id}`,
       cancelUrl: `${config.appUrl}/contracts/${m.contract.id}?paypal=cancelled&milestone=${m.id}`,
@@ -53,7 +56,7 @@ export default async function escrowRoutes(app) {
       .eq('id', m.id)
     await audit({
       contractId: m.contract.id, milestoneId: m.id, actor: 'paypal', event: 'escrow.funds_held',
-      payload: { authorizationId: authorization.id, amountCents: m.amount_cents, expiresAt: authorization.expiration_time },
+      payload: { authorizationId: authorization.id, amountCents: m.amount_cents + (m.expense_budget_cents || 0), expenseBudgetCents: m.expense_budget_cents || undefined, expiresAt: authorization.expiration_time },
     })
     return { status: 'funded', authorizationId: authorization.id }
   })

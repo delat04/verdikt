@@ -10,6 +10,7 @@ import VButton from './ui/VButton.vue'
 import VIconButton from './ui/VIconButton.vue'
 import VPill from './ui/VPill.vue'
 import { KIND } from '@/domain/milestone'
+import { probeLabel } from '@/domain/probes'
 
 const props = defineProps({
   criteria: { type: Array, required: true },
@@ -56,12 +57,25 @@ function save() {
             <VPill size="sm" :dot="false" outline>
               <component :is="ICON[c.kind]" :size="12" :stroke-width="1.9" /> {{ KIND[c.kind]?.label || c.kind }}
             </VPill>
-            <button v-if="c.method" type="button" class="crit__how" :aria-expanded="open.has(c.id)" @click="toggle(c.id)">
+            <span v-if="c.spec?.probes?.length" class="crit__probe-count vk-num" :title="c.spec.sufficient ? 'Deterministic probes decide this check on their own' : 'Probes run first; Claude judges what they can’t settle'">
+              {{ c.spec.probes.length }} probe{{ c.spec.probes.length > 1 ? 's' : '' }}{{ c.spec.sufficient ? ' · decides alone' : ' + Claude' }}
+            </span>
+            <span v-else-if="c.spec" class="crit__probe-count vk-num" title="No probe can test this sentence; Claude judges it from the evidence">Claude</span>
+            <button v-if="c.method || c.spec" type="button" class="crit__how" :aria-expanded="open.has(c.id)" @click="toggle(c.id)">
               How it's checked <ChevronDown :size="13" :stroke-width="1.9" :class="{ flip: open.has(c.id) }" />
             </button>
           </div>
           <Transition name="vk-fade">
-            <p v-if="open.has(c.id)" class="crit__method">{{ c.method }}</p>
+            <div v-if="open.has(c.id)" class="crit__method">
+              <p v-if="c.method" class="crit__method-text">{{ c.method }}</p>
+              <template v-if="c.spec?.probes?.length">
+                <ul class="crit__probes">
+                  <li v-for="(p, k) in c.spec.probes" :key="k"><span class="crit__probe-type vk-num">{{ p.type }}</span> {{ probeLabel(p) }}</li>
+                </ul>
+                <p class="crit__decides">{{ c.spec.sufficient ? 'These probes decide the check on their own: the same page always gets the same answer, with no model call.' : 'The probes run first and a hard failure fails the check on its own. If they pass, Claude judges the rest, with their results as facts.' }}</p>
+              </template>
+              <p v-else-if="c.spec" class="crit__decides">No probe can measure this sentence, so Claude judges it from the screenshots, page text and repository.</p>
+            </div>
           </Transition>
         </div>
       </li>
@@ -103,7 +117,12 @@ function save() {
 .crit__how:hover { color: var(--vk-ink); }
 .crit__how svg { transition: transform var(--vk-dur-2); }
 .crit__how svg.flip { transform: rotate(180deg); }
-.crit__method { margin: 8px 0 0; padding: 10px 12px; border-radius: var(--vk-r-sm); background: var(--vk-surface-2); border: 1px solid var(--vk-line-subtle); font: var(--vk-type-dense); color: var(--vk-ink-2); }
+.crit__method { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 0; padding: 10px 12px; border-radius: var(--vk-r-sm); background: var(--vk-surface-2); border: 1px solid var(--vk-line-subtle); font: var(--vk-type-dense); color: var(--vk-ink-2); }
+.crit__method-text, .crit__decides { margin: 0; }
+.crit__decides { font: var(--vk-type-small); color: var(--vk-muted); }
+.crit__probes { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font: var(--vk-type-small); color: var(--vk-ink); }
+.crit__probe-type { display: inline-block; min-width: 0; margin-right: 6px; padding: 0 6px; border: 1px solid var(--vk-line); border-radius: var(--vk-r-full); background: var(--vk-surface); font-size: 11px; color: var(--vk-muted); }
+.crit__probe-count { font-size: 11px; color: var(--vk-muted); }
 
 .crit__edit { display: flex; flex-direction: column; gap: 10px; }
 .crit__edit-row { display: grid; grid-template-columns: 22px 140px minmax(0, 1fr) auto; gap: 10px; align-items: start; }

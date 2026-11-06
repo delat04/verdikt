@@ -45,32 +45,40 @@ export async function release(milestone, actor, { amountCents, final = true, pas
   const cents = Math.min(remaining, Math.max(100, Math.round(amountCents ?? remaining)))
   const releasedNow = already + cents
   const currency = milestone.contract?.currency || 'USD'
-  const index = (milestone.tranches || []).length
+  // read fresh: an expense reimbursed meanwhile is a capture on the same hold
+  const { data: fresh } = await db().from('milestones').select('tranches, expense_budget_cents').eq('id', milestone.id).single()
+  const tranches = fresh?.tranches ?? milestone.tranches ?? []
+  const budget = fresh?.expense_budget_cents || 0
+  const index = tranches.length
 
   const capture = await paypal.captureAuthorization(milestone.paypal_authorization_id, {
     requestId: `release-${milestone.id}-${index}`,
-    amountCents: final && !already && cents === full ? undefined : cents,
+    // the hold also carries the expense budget: always name the amount, so the work never takes the budget with it
+    amountCents: final && !already && cents === full && !budget ? undefined : cents,
     currency,
     finalCapture: final,
     noteToPayer: !final
       ? `Verdikt: ${money(cents, currency)} released for ${milestone.title} — ${passed} of ${total} checks passed; the rest stays on hold`
       : releasedNow < full
         ? `Verdikt: ${money(releasedNow, currency)} of ${money(full, currency)} released for ${milestone.title}; the rest of the hold is returned to you`
-        : `Verdikt: ${milestone.title} passed its checks`,
+        : `Verdikt: ${milestone.title} passed its checks${budget ? '; any unused expense budget is returned to you' : ''}`,
   })
+  // a final capture closes the authorization: what's left of the expense budget goes back with it
+  const unspent = final && budget ? budget - await spentOn(milestone.id) : 0
   const tranche = { captureId: capture.id, cents, passed: passed ?? null, total: total ?? null, final, at: new Date().toISOString() }
   await db().from('milestones').update({
     ...(final
-      ? { status: 'released', released_at: new Date().toISOString(), progress: null, voided_cents: full - releasedNow }
+      ? { status: 'released', released_at: new Date().toISOString(), progress: null, voided_cents: full - releasedNow + unspent }
       : {}),
     paypal_capture_id: capture.id, released_cents: releasedNow,
-    tranches: [...(milestone.tranches || []), tranche],
+    tranches: [...tranches, tranche],
   }).eq('id', milestone.id)
   await audit({
     contractId: milestone.contract_id, milestoneId: milestone.id, actor: actor === 'agent' ? 'paypal' : actor,
     event: !final ? 'escrow.check_released' : releasedNow < full ? 'escrow.partially_released' : 'escrow.released',
-    payload: { captureId: capture.id, status: capture.status, amountCents: cents, releasedCents: releasedNow, ofCents: full, returnedCents: final ? full - releasedNow : 0, passed, total, by: actor },
+    payload: { captureId: capture.id, status: capture.status, amountCents: cents, releasedCents: releasedNow, ofCents: full, returnedCents: final ? full - releasedNow + unspent : 0, unspentExpensesCents: unspent || undefined, passed, total, by: actor },
   })
+  if (final) await closeExpenses(milestone)
 
   // Paying the freelancer is a second step: if it can't happen yet (no payout email), the release still stands
   await payout(milestone.id).catch((e) => audit({
@@ -185,7 +193,13 @@ export async function settlePayout(batchId, status, itemId) {
   const { data: rows } = await db().from('milestones').select('*').contains('tranches', [{ payoutBatchId: batchId }]).limit(1)
   let m = rows?.[0]
   if (!m) ({ data: m } = await db().from('milestones').select('*').eq('paypal_payout_batch_id', batchId).maybeSingle())
-  if (!m) return false
+  if (!m) {
+    // a reimbursed expense is paid out on its own batch
+    const { data: e } = await db().from('expenses').select('*').eq('payout_batch_id', batchId).maybeSingle()
+    if (!e) return false
+    await settleExpense(e, status, itemId)
+    return true
+  }
   const list = tranchesOf(m)
   const t = list.find((x) => x.payoutBatchId === batchId)
   if (!t || t.payoutStatus === status) return true
@@ -202,6 +216,8 @@ export async function resumePayouts() {
   for (const m of data || []) {
     for (const t of tranchesOf(m)) if (t.payoutBatchId && IN_FLIGHT.includes(t.payoutStatus)) { watchPayout(m.id, t.payoutBatchId); n++ }
   }
+  const { data: claims } = await db().from('expenses').select('id, payout_batch_id').in('payout_status', IN_FLIGHT).not('payout_batch_id', 'is', null)
+  for (const e of claims || []) { watchExpensePayout(e.id, e.payout_batch_id); n++ }
   return n
 }
 
@@ -212,12 +228,112 @@ export async function resumePayouts() {
 export async function refund(milestone, actor) {
   await paypal.voidAuthorization(milestone.paypal_authorization_id, { requestId: `refund-${milestone.id}` })
   const kept = milestone.released_cents || 0
-  const returned = milestone.amount_cents - kept
+  // reimbursed expenses stand; the rest of the budget is voided with the work
+  const unspent = (milestone.expense_budget_cents || 0) - await spentOn(milestone.id)
+  const returned = milestone.amount_cents - kept + unspent
   await db().from('milestones').update({
     status: kept ? 'released' : 'refunded', progress: null, voided_cents: returned, ...(kept ? { released_at: new Date().toISOString() } : {}),
   }).eq('id', milestone.id)
   await audit({ contractId: milestone.contract_id, milestoneId: milestone.id, actor, event: 'escrow.refunded', payload: { amountCents: returned, keptCents: kept } })
+  await closeExpenses(milestone)
   await advance(milestone.contract_id)
+}
+
+/* ---------------------------------------------------------------- expenses
+   A milestone's expense budget sits in the same PayPal authorization as the work. Each receipt that passes
+   its checks is one partial capture (final_capture=false) and one payout to the freelancer, with no Verdikt
+   fee: it's the client's money for the client's project, passed through. */
+
+const LIVE_CLAIM = ['checking', 'needs_client']
+
+/** What's been captured from this milestone's hold for expenses. */
+export async function spentOn(milestoneId) {
+  const { data } = await db().from('expenses').select('amount_cents').eq('milestone_id', milestoneId).not('paypal_capture_id', 'is', null)
+  return (data || []).reduce((s, e) => s + e.amount_cents, 0)
+}
+
+/** The hold closed (released or voided): claims still waiting can't be paid from it any more. */
+async function closeExpenses(milestone) {
+  const { data } = await db().from('expenses').update({ status: 'expired', note: 'The milestone settled before this claim was decided, so its PayPal hold is closed.', decided_at: new Date().toISOString() })
+    .eq('milestone_id', milestone.id).in('status', LIVE_CLAIM).select('id')
+  if (data?.length) await audit({ contractId: milestone.contract_id, milestoneId: milestone.id, actor: 'system', event: 'expense.expired', payload: { count: data.length } })
+}
+
+/** Capture one claim from the milestone's hold, then pay it out. Throws if PayPal refuses; the caller records it. */
+export async function reimburse(expense, by) {
+  const { data: m } = await db().from('milestones').select('id, contract_id, title, status, paypal_authorization_id, contract:contracts(currency)').eq('id', expense.milestone_id).single()
+  if (!m.paypal_authorization_id || !HELD.includes(m.status)) throw new Error('This milestone has settled, so its PayPal hold is closed')
+  const currency = m.contract?.currency || 'USD'
+  const capture = await paypal.captureAuthorization(m.paypal_authorization_id, {
+    requestId: `expense-${expense.id}`,
+    amountCents: expense.amount_cents,
+    currency,
+    finalCapture: false,   // the work and the rest of the budget stay held
+    noteToPayer: `Verdikt: ${money(expense.amount_cents, currency)} reimbursed from the expense budget for ${expense.merchant || 'a project expense'} (${m.title})`,
+  })
+  await db().from('expenses').update({
+    status: 'approved', decided_by: by, decided_at: new Date().toISOString(), paypal_capture_id: capture.id, note: '',
+  }).eq('id', expense.id)
+  await audit({
+    contractId: m.contract_id, milestoneId: m.id, actor: 'paypal', event: 'expense.reimbursed',
+    payload: { expenseId: expense.id, captureId: capture.id, amountCents: expense.amount_cents, merchant: expense.merchant, by },
+  })
+  await payoutExpense(expense.id).catch((e) => audit({
+    contractId: m.contract_id, milestoneId: m.id, actor: 'paypal', event: 'payout.failed', payload: { message: e.message, expenseId: expense.id },
+  }))
+  return capture
+}
+
+/** Pay a reimbursed claim out to the freelancer's PayPal — the whole amount, no fee. Safe to call again. */
+export async function payoutExpense(id) {
+  const { data: e } = await db().from('expenses')
+    .select('*, milestone:milestones(title), contract:contracts(title, currency, freelancer:profiles!contracts_freelancer_id_fkey(paypal_email))')
+    .eq('id', id).single()
+  if (!e.paypal_capture_id) return { skipped: 'not reimbursed' }
+  if (DONE_PAYOUT.includes(e.payout_status) || (e.payout_batch_id && IN_FLIGHT.includes(e.payout_status))) return { skipped: 'already paid out' }
+  const currency = e.contract.currency || 'USD'
+  const email = e.contract.freelancer?.paypal_email
+  if (!email) {
+    await db().from('expenses').update({ payout_status: 'NEEDS_EMAIL' }).eq('id', id)
+    await audit({ contractId: e.contract_id, milestoneId: e.milestone_id, actor: 'system', event: 'payout.needs_email', payload: { amountCents: e.amount_cents, expenseId: id } })
+    return { status: 'NEEDS_EMAIL' }
+  }
+  const what = e.merchant || 'a project expense'
+  const batch = await paypal.createPayout({
+    senderBatchId: e.payout_batch_id ? `vkx-${id.slice(0, 18)}-${Date.now()}` : `vkx-${id}`,
+    email, amountCents: e.amount_cents, currency, itemId: `x-${id.slice(0, 24)}`,
+    subject: `Reimbursed: ${money(e.amount_cents, currency)} for ${what}`,
+    note: `Verdikt reimbursed ${money(e.amount_cents, currency)} for ${what} from the expense budget of "${e.milestone.title}" (${e.contract.title}). Expenses carry no Verdikt fee.`,
+  })
+  const batchId = batch.batch_header?.payout_batch_id
+  await db().from('expenses').update({ payout_batch_id: batchId, payout_status: batch.batch_header?.batch_status || 'PENDING', payout_email: email }).eq('id', id)
+  await audit({ contractId: e.contract_id, milestoneId: e.milestone_id, actor: 'paypal', event: 'payout.sent', payload: { batchId, amountCents: e.amount_cents, feeCents: 0, email, expenseId: id } })
+  watchExpensePayout(id, batchId)
+  return { status: 'PENDING', batchId }
+}
+
+async function settleExpense(e, status, itemId) {
+  if (!e || e.payout_status === status) return
+  await db().from('expenses').update({ payout_status: status, ...(status === 'SUCCESS' ? { paid_out_at: new Date().toISOString() } : {}) }).eq('id', e.id)
+  if (status === 'SUCCESS') {
+    await audit({ contractId: e.contract_id, milestoneId: e.milestone_id, actor: 'paypal', event: 'payout.completed', payload: { amountCents: e.amount_cents, email: e.payout_email, itemId, expenseId: e.id } })
+  } else if (RETRYABLE_PAYOUT.includes(status)) {
+    await audit({ contractId: e.contract_id, milestoneId: e.milestone_id, actor: 'paypal', event: 'payout.failed', payload: { status, expenseId: e.id } })
+  }
+}
+
+function watchExpensePayout(id, batchId, tries = 0) {
+  setTimeout(async () => {
+    let status
+    try {
+      const b = await paypal.getPayout(batchId)
+      const item = b.items?.[0]
+      status = item?.transaction_status || b.batch_header?.batch_status
+      const { data: e } = await db().from('expenses').select('*').eq('id', id).single()
+      if (status) await settleExpense(e, status, item?.payout_item_id)
+    } catch {}
+    if (!['SUCCESS', ...RETRYABLE_PAYOUT].includes(status) && tries < 20) watchExpensePayout(id, batchId, tries + 1)
+  }, tries < 5 ? 3000 : 15000)
 }
 
 /**

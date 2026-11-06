@@ -22,13 +22,16 @@ export class AgentError extends Error {}
  * @param {string} [p.effort]    — low | medium | high | xhigh | max
  * @param {Array}  [p.mcpServers] — [{ type: 'url', url, name, authorization_token }]
  * @param {Array}  [p.toolsets]   — [{ type: 'mcp_toolset', mcp_server_name, default_config, configs }]
- * @returns {Promise<{ input: object, trace: Array<{ tool: string, input: object, ok: boolean }> }>}
+ * @returns {Promise<{ input: object, trace: Array<{ tool: string, input: object, ok: boolean }>, usage: { input: number, output: number, searches: number }, searched: Array<{ url: string, title: string, age: string }> }>}
  */
 export async function callAgent({ system, content, tool, effort = 'high', mcpServers, toolsets = [] }) {
   const messages = [{ role: 'user', content }]
   const trace = []
+  const usage = { input: 0, output: 0, searches: 0 }
+  const searched = []   // every page a server-side web search returned: what the answer may cite
+  let nudged = false
   // a long run of server-side tool calls can pause the turn; send it back as-is to let it continue
-  for (let turn = 0; turn < 4; turn += 1) {
+  for (let turn = 0; turn < 5; turn += 1) {
     const response = await anthropic().beta.messages.create({
       model: MODEL,
       max_tokens: 16000,
@@ -43,8 +46,14 @@ export async function callAgent({ system, content, tool, effort = 'high', mcpSer
       messages,
     })
 
+    usage.input += (response.usage?.input_tokens || 0) + (response.usage?.cache_read_input_tokens || 0) + (response.usage?.cache_creation_input_tokens || 0)
+    usage.output += response.usage?.output_tokens || 0
+    usage.searches += response.usage?.server_tool_use?.web_search_requests || 0
     for (const b of response.content) {
       if (b.type === 'mcp_tool_use') trace.push({ id: b.id, tool: b.name, input: b.input, ok: true })
+      if (b.type === 'web_search_tool_result' && Array.isArray(b.content)) {
+        for (const r of b.content) if (r.url) searched.push({ url: r.url, title: r.title || '', age: r.page_age || '' })
+      }
       if (b.type === 'mcp_tool_result') {
         const t = trace.find((x) => x.id === b.tool_use_id)
         if (t) t.ok = !b.is_error
@@ -61,8 +70,15 @@ export async function callAgent({ system, content, tool, effort = 'high', mcpSer
       continue
     }
     const call = response.content.find((b) => b.type === 'tool_use' && b.name === tool.name)
+    // with server tools in play it may end its turn in prose: ask once more for the answer tool (this model
+    // doesn't take a forced tool_choice)
+    if (!call && !nudged) {
+      messages.push({ role: 'assistant', content: response.content }, { role: 'user', content: `Now record your answer by calling ${tool.name} — nothing else.` })
+      nudged = true
+      continue
+    }
     if (!call) throw new AgentError(`The model did not call ${tool.name}`)
-    return { input: call.input, trace: trace.map(({ id, ...t }) => t) }
+    return { input: call.input, trace: trace.map(({ id, ...t }) => t), usage, searched }
   }
   throw new AgentError('The model kept working past the turn limit')
 }
