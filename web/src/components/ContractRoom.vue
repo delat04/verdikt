@@ -392,8 +392,6 @@ async function switchToOther() {
           </div>
         </section>
 
-        <!-- acceptance stays at the bottom of the column -->
-        <div class="agree-dock">
         <section v-if="other" class="agent" :class="{ 'is-on': agentOn }" aria-label="Your negotiating agent">
           <div class="agent__head">
             <span class="agent__icon" aria-hidden="true"><Bot :size="16" /></span>
@@ -416,6 +414,8 @@ async function switchToOther() {
             <VButton size="sm" :variant="agentOn ? 'ghost' : 'secondary'" :icon="agentOn ? null : Bot" @click="openMandate">{{ agentOn ? 'Adjust limits' : mandate ? 'Hand it back to the agent' : 'Set up my agent' }}</VButton>
           </div>
         </section>
+        <!-- acceptance stays at the bottom of the column -->
+        <div class="agree-dock">
         <section class="agree" aria-label="Accept the terms">
           <ul class="agree__rows">
             <li v-for="r in acceptRows" :key="r.role" :class="{ 'is-ok': r.ok }">
@@ -608,7 +608,7 @@ async function switchToOther() {
 
 .msg__agent { display: inline-flex; align-items: center; gap: 3px; padding: 0 7px; border: 1px solid var(--vk-accent-line); border-radius: var(--vk-r-full); color: var(--vk-accent-text); font-size: 11px; line-height: 16px; }
 
-.agent { margin-bottom: 10px; padding: 14px 16px; border: 1px solid var(--vk-line); border-radius: var(--vk-r-md); background: var(--vk-surface); display: flex; flex-direction: column; gap: 10px; }
+.agent { padding: 14px 16px; border: 1px solid var(--vk-line); border-radius: var(--vk-r-md); background: var(--vk-surface); display: flex; flex-direction: column; gap: 10px; }
 .agent.is-on { border-color: var(--vk-accent-line); background: var(--vk-accent-soft); }
 .agent__head { display: flex; gap: 10px; align-items: flex-start; }
 .agent__icon { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--vk-line); background: var(--vk-surface); color: var(--vk-accent-text); }

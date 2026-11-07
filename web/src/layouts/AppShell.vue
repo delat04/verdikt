@@ -50,6 +50,20 @@ const rows = computed(() => (data.value || []).map((c) => {
   return { c, role, other: counterparty(c, role), step: nextStep(c, role) }
 }))
 const onYou = computed(() => rows.value.filter((r) => r.step?.actor === 'you').length)
+// …and the job board, for applications waiting on the person who posted: a move of theirs too
+const { data: jobs } = useLive(() => api.listJobs())
+const hiring = computed(() => (jobs.value?.posted || []).filter((j) => j.status === 'open')
+  .map((j) => ({ j, n: (j.candidates || []).filter((a) => a.status === 'pending').length })).filter((x) => x.n))
+const toReview = computed(() => hiring.value.reduce((s, x) => s + x.n, 0))
+const queue = computed(() => [...rows.value, ...hiring.value.map(({ j, n }) => ({
+  c: { id: `job-${j.id}`, title: j.title },
+  step: { actor: 'you', short: `Review ${n} application${n > 1 ? 's' : ''}` },
+  to: { path: '/jobs', query: { view: 'posts' } },
+}))])
+const badges = computed(() => ({
+  '/contracts': onYou.value && { n: onYou.value, title: `${onYou.value} waiting on you` },
+  '/jobs': toReview.value && { n: toReview.value, title: `${toReview.value} application${toReview.value > 1 ? 's' : ''} to review` },
+}))
 
 // ---- demo persona switch
 const personas = isDemo ? api.personas() : null
@@ -130,7 +144,7 @@ onBeforeUnmount(() => {
         >
           <component :is="item.icon" :size="18" :stroke-width="1.9" />
           <span class="side__label">{{ item.label }}</span>
-          <span v-if="item.to === '/contracts' && onYou" class="side__badge vk-num" :title="`${onYou} waiting on you`">{{ onYou }}</span>
+          <span v-if="badges[item.to]" class="side__badge vk-num" :title="badges[item.to].title">{{ badges[item.to].n }}</span>
         </RouterLink>
       </nav>
 
@@ -159,7 +173,7 @@ onBeforeUnmount(() => {
           <div class="top__crumbs"><slot name="crumbs" /></div>
         </div>
 
-        <QueueCapsule :rows="rows" class="top__queue" />
+        <QueueCapsule :rows="queue" class="top__queue" />
 
         <div class="top__right">
           <button type="button" class="vk-icon-btn vk-icon-btn--lg top__search" aria-label="Search" @click="palette = true"><Search :size="17" :stroke-width="1.9" /></button>

@@ -19,7 +19,7 @@ const items = computed(() => [...mine.value, ...agent.value].slice(0, props.max)
   label: r.step.short || r.step.title,
   where: r.c.title,
   mine: r.step.actor === 'you',
-  to: r.step.actor === 'you' && r.step.action ? { path: `/contracts/${r.c.id}`, query: { act: r.step.action } } : `/contracts/${r.c.id}`,
+  to: r.to || (r.step.actor === 'you' && r.step.action ? { path: `/contracts/${r.c.id}`, query: { act: r.step.action } } : `/contracts/${r.c.id}`),
 })))
 const more = computed(() => mine.value.length + agent.value.length - items.value.length)
 </script>

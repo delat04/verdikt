@@ -8,7 +8,7 @@
 -->
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { Briefcase, Search, Send, Check, X, Copy, ExternalLink, Scale, Globe, ArrowRight } from 'lucide-vue-next'
 import AppShell from '@/layouts/AppShell.vue'
 import VButton from '@/components/ui/VButton.vue'
@@ -25,9 +25,11 @@ import { money, toCents, timeAgo, firstName, hostOf } from '@/domain/format'
 
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
 const { data, loading } = useLive(() => api.listJobs())
 
-const view = ref(auth.profile?.intent === 'client' ? 'posts' : 'find')
+const view = ref(['find', 'posts', 'post'].includes(route.query.view) ? route.query.view : auth.profile?.intent === 'client' ? 'posts' : 'find')
+watch(() => route.query.view, (v) => { if (['find', 'posts', 'post'].includes(v)) view.value = v })
 const views = computed(() => [
   { value: 'find', label: 'Find work' },
   { value: 'posts', label: `Your posts${data.value?.posted?.length ? ` · ${data.value.posted.length}` : ''}` },

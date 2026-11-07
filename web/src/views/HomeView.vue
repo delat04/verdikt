@@ -7,7 +7,7 @@
 <script setup>
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, KeyRound, FileText, Search, X, ArrowRight } from 'lucide-vue-next'
+import { Plus, KeyRound, FileText, Search, X, ArrowRight, ArrowUpRight, Briefcase } from 'lucide-vue-next'
 import AppShell from '@/layouts/AppShell.vue'
 import VButton from '@/components/ui/VButton.vue'
 import VCard from '@/components/ui/VCard.vue'
@@ -32,8 +32,8 @@ const auth = useAuthStore()
 const router = useRouter()
 
 const { data, loading, error } = useLive(async () => {
-  const [contracts, invites] = await Promise.all([api.listContracts(), api.listInvites()])
-  return { contracts, invites }
+  const [contracts, invites, jobs] = await Promise.all([api.listContracts(), api.listInvites(), api.listJobs().catch(() => null)])
+  return { contracts, invites, jobs }
 })
 
 const rows = computed(() => (data.value?.contracts || []).map((c) => {
@@ -52,6 +52,36 @@ const activity = computed(() => rows.value
   .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   .slice(0, 12))
 const firstRun = computed(() => !loading.value && !rows.value.length && !invites.value.length)
+// before the first contract the work usually starts on the job board: point at what's waiting there
+const lead = computed(() => {
+  const j = data.value?.jobs
+  if (!j) return null
+  const post = (j.posted || []).find((p) => p.status === 'open' && p.candidates?.some((a) => a.status === 'pending'))
+  if (post) {
+    const n = post.candidates.filter((a) => a.status === 'pending').length
+    return {
+      title: `${n} ${n > 1 ? 'people' : 'person'} applied to “${post.title}”`,
+      sub: 'Each application arrives reviewed: their paid work on Verdikt, red flags, and how well the pitch fits your brief. Hiring one opens a contract room with both of you.',
+      label: 'Review applications', to: { path: '/jobs', query: { view: 'posts' } },
+    }
+  }
+  const sent = (j.applied || []).find((a) => a.status === 'pending')
+  if (sent) {
+    return {
+      title: `You applied to “${sent.job?.title}”`,
+      sub: `${firstName(sent.job?.client || 'The client')} sees your price and pitch with a review. Once you're hired, the contract room opens here.`,
+      label: 'Find more work', to: { path: '/jobs', query: { view: 'find' } },
+    }
+  }
+  if (auth.profile?.intent !== 'client' && j.open?.length) {
+    return {
+      title: `${j.open.length} open job${j.open.length > 1 ? 's' : ''} on the board`,
+      sub: 'Apply with a price and a pitch, yourself or through your agent. Hiring opens a contract room, and PayPal holds the money until the work passes the checks you both sign.',
+      label: 'Find work', to: { path: '/jobs', query: { view: 'find' } },
+    }
+  }
+  return null
+})
 
 // ---- filters
 const DONE = ['completed', 'cancelled']
@@ -153,10 +183,17 @@ async function sample() {
         <div class="vk-split__col">
           <p v-if="error" class="vk-field__error">{{ error }}</p>
           <VNotchCard as="section" class="first">
-            <VEmptyState :icon="FileText" title="No contracts yet" sub="Describe the work and set milestones. The agent turns it into checks you both sign, PayPal holds the money, and it moves only when the checks pass.">
-              <VButton :icon="Plus" to="/contracts/new">Create a contract</VButton>
-              <VButton v-if="isDemo" variant="secondary" :loading="loadingSample" @click="sample">Load a sample contract</VButton>
-              <VButton v-if="isDemo" variant="secondary" :loading="loadingRoom" @click="sampleRoom">Open a sample contract room</VButton>
+            <template #corner>
+              <RouterLink :to="lead?.to || '/contracts/new'" class="vk-notch__corner" :aria-label="lead?.label || 'Create a contract'"><ArrowUpRight :size="17" :stroke-width="1.9" /></RouterLink>
+            </template>
+            <VEmptyState
+              :icon="lead ? Briefcase : FileText" :title="lead?.title || 'No contracts yet'"
+              :sub="lead?.sub || 'Describe the work and set milestones. The agent turns it into checks you both sign, PayPal holds the money, and it moves only when the checks pass.'"
+            >
+              <VButton v-if="lead" :icon="ArrowRight" :to="lead.to">{{ lead.label }}</VButton>
+              <VButton :variant="lead ? 'secondary' : 'primary'" :icon="Plus" to="/contracts/new">Create a contract</VButton>
+              <VButton v-if="isDemo && !lead" variant="secondary" :loading="loadingSample" @click="sample">Load a sample contract</VButton>
+              <VButton v-if="isDemo && !lead" variant="secondary" :loading="loadingRoom" @click="sampleRoom">Open a sample contract room</VButton>
               <VButton variant="ghost" :icon="KeyRound" to="/join">I have an invite code</VButton>
             </VEmptyState>
           </VNotchCard>

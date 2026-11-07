@@ -1197,7 +1197,7 @@ export const demo = {
     }
     const joined = { client: true, freelancer: true }
     say(c, 'client', j.brief)
-    c.room.terms = mediateDemo(c.room, { names: roomNames(c), joined }).terms
+    mediateDemo(c.room, { names: roomNames(c), joined })   // reads the brief; the first terms the room shows come after the proposal, as v1
     // the accepted proposal sets the price and the timeline
     Object.assign(c.room.demo, { total: a.priceCents, days: a.days || j.dueDays || 0, priceBy: 'freelancer' })
     say(c, 'system', `${u.name} hired ${a.freelancer.name} from the job post.`)

@@ -16,7 +16,9 @@ const FEATURES = [
   { key: 'payments', test: /card payments?|checkout|pay online|online payments?|\bstripe\b|\bcart\b/i, name: 'Card payments at checkout', short: 'card payments', done: 'A sandbox card payment completes and the confirmation shows the paid total' },
   { key: 'orders', test: /pre-?orders?|ordering|order (?:\w+ )?(?:online|for pickup)|\bpickup\b|order (?:a |the )?cakes?/i, name: 'Order requests for pickup', short: 'pickup orders', done: 'A test order with name, items and pickup time shows a confirmation with the order total' },
   { key: 'booking', test: /\bbook(?:ing|ings)?\b|reserv|appointment/i, name: 'Bookings', short: 'bookings', done: 'A test booking for tomorrow shows a confirmation with the chosen time' },
-  { key: 'form', test: /contact form|request form|\bform\b|enquir|inquir/i, name: 'Contact form', short: 'a contact form', done: 'Submitting the form shows a confirmation, and empty required fields show an error' },
+  { key: 'loyalty', early: true, test: /loyalty|\bqr code/i, name: 'Loyalty card sign-up', short: 'a loyalty card sign-up', done: 'The sign-up form accepts an email and shows the customer their own QR code' },
+  { key: 'stamps', test: /\bstamps?\b|staff scan|scan the qr|reward/i, name: 'Stamp scanning and the free-coffee reward', short: 'stamp scanning', done: 'Scanning a customer’s QR on the staff page adds a stamp, and the tenth stamp shows the free-coffee reward' },
+  { key: 'form', test: /contact form|request form|(?<!sign[- ]?up )\bform\b|enquir|inquir/i, name: 'Contact form', short: 'a contact form', done: 'Submitting the form shows a confirmation, and empty required fields show an error' },
   { key: 'newsletter', test: /newsletter|mailing list|subscribe/i, name: 'Newsletter signup', short: 'a newsletter signup', done: 'The newsletter form accepts a valid email and shows a confirmation' },
   { key: 'login', test: /log ?in|sign ?in|\baccounts?\b|dashboard/i, name: 'Accounts and sign-in', short: 'accounts', done: 'A new user can sign up, sign in and reach their account page' },
 ]
