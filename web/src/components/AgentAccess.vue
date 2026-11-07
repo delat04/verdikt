@@ -1,8 +1,8 @@
 <!--
   AgentAccess — personal tokens that let an AI agent use Verdikt for you over MCP (Claude Desktop,
   Claude Code, any MCP client). A token is shown once; the agent acts with your rights, everything
-  it says is labelled as your agent, and money still needs you: it can create a PayPal hold link,
-  never approve one.
+  it says is labelled as your agent, and money needs you once: it creates PayPal hold links you approve,
+  or holds jobs from the spending limit you approved (SpendLimit, below).
 -->
 <script setup>
 import { ref, onMounted } from 'vue'
@@ -57,8 +57,8 @@ const codeCommand = (token) => `claude mcp add --transport http verdikt ${mcpUrl
   <VCard title="AI agents" sub="Let an AI agent hire, negotiate and deliver through Verdikt for you, over MCP.">
     <div class="aa">
       <ul class="aa__facts">
-        <li><Bot :size="15" aria-hidden="true" /> 13 tools: open a contract room, talk, delegate the negotiation, accept and sign terms, fund, deliver, read verdicts.</li>
-        <li><ShieldCheck :size="15" aria-hidden="true" /> It acts with your rights and everything it says is labelled as your agent. Money still needs you: it can create a PayPal hold link, only you approve it.</li>
+        <li><Bot :size="15" aria-hidden="true" /> 28 tools: price and post jobs, review applicants and hire, negotiate, accept and sign terms, fund, deliver, read verdicts.</li>
+        <li><ShieldCheck :size="15" aria-hidden="true" /> It acts with your rights and everything it says is labelled as your agent. Money needs you once: approve each PayPal hold, or set a spending limit and it holds jobs from that, within your rules.</li>
       </ul>
 
       <template v-if="isDemo">

@@ -11,6 +11,7 @@ import { useTheme } from '@/composables/useTheme'
 import { toast } from '@/composables/useToast'
 import { isDemo } from '@/services'
 import AgentAccess from '@/components/AgentAccess.vue'
+import SpendLimit from '@/components/SpendLimit.vue'
 import ProofSettings from '@/components/ProofSettings.vue'
 
 const auth = useAuthStore()
@@ -66,6 +67,8 @@ async function save() {
         <ProofSettings />
 
         <AgentAccess />
+
+        <SpendLimit />
 
         <VCard title="Appearance">
           <VSegmented

@@ -16,6 +16,39 @@ export const PERSONAS = {
   freelancer: { id: 'u_sam', name: 'Sam Okafor', email: 'sam@okafor.studio', intent: 'freelancer', org: 'Okafor Studio' },
 }
 
+// ---------------------------------------------------------------- spending limits
+// one simulated PayPal hold per person; each milestone funded from it is earmarked, captured when it passes,
+// freed when it fails; what was never captured is voided when the limit ends (as server/src/lib/limits.js)
+const LIMIT_OPEN = ['awaiting_approval', 'active', 'closing']
+const LIMIT_HELD = ['funded', 'submitted', 'verifying', 'passed', 'failed', 'disputed']
+const limitsFor = () => (db.limits ||= [])
+function limitUse(l) {
+  const holds = []
+  for (const c of db.contracts) {
+    for (const m of c.milestones) {
+      if (m.spendLimitId !== l.id) continue
+      const hold = m.amountCents + (m.expenseBudgetCents || 0)
+      const captured = (m.releasedCents || 0) + (m.expenses || []).filter((e) => e.captureId).reduce((s, e) => s + e.amountCents, 0)
+      holds.push({
+        milestoneId: m.id, contractId: c.id, contract: c.title, freelancer: c.freelancer?.name || null, title: `M${m.position} · ${m.title}`,
+        status: m.status, fundedAt: m.fundedAt, holdCents: hold, capturedCents: captured, reservedCents: LIMIT_HELD.includes(m.status) ? hold - captured : 0,
+      })
+    }
+  }
+  const capturedCents = holds.reduce((s, h) => s + h.capturedCents, 0)
+  const reservedCents = holds.reduce((s, h) => s + h.reservedCents, 0)
+  const liveNow = l.status === 'active' && new Date(l.endsAt).getTime() > Date.now()
+  return { capturedCents, reservedCents, availableCents: liveNow ? Math.max(0, l.capCents - capturedCents - reservedCents) : 0, holds: holds.sort((a, b) => (b.fundedAt || '').localeCompare(a.fundedAt || '')) }
+}
+const limitView = (l) => ({ ...l, ...limitUse(l) })
+function settleLimit(l) {
+  if (l.status === 'active' && new Date(l.endsAt).getTime() < Date.now()) Object.assign(l, { status: 'closing', closedReason: 'Reached its end date' })
+  if (l.status !== 'closing') return
+  const u = limitUse(l)
+  if (u.holds.some((h) => LIMIT_HELD.includes(h.status))) return
+  Object.assign(l, { status: 'closed', closedAt: now(), voidedCents: Math.max(0, l.capCents - u.capturedCents) })
+}
+
 // ---------------------------------------------------------------- storage
 function blank() {
   const profiles = {}
@@ -1038,6 +1071,75 @@ export const demo = {
     save()
   },
 
+  // ---- spending limit (simulated PayPal sandbox): one hold approved once; each job is earmarked from it
+  async listSpendLimits() {
+    await latency()
+    const u = me()
+    const mine = limitsFor().filter((l) => l.clientId === u.id)
+    mine.forEach(settleLimit)
+    const open = mine.find((l) => LIMIT_OPEN.includes(l.status))
+    return clone({ current: open ? limitView(open) : null, past: mine.filter((l) => l !== open).slice(0, 5).map(limitView) })
+  },
+  async createSpendLimit({ capCents, perJobCents, days = 14, note = '' }) {
+    await latency()
+    const u = me()
+    if (!(capCents >= 100)) throw new Error('Set a limit of at least $1.00')
+    if (!(perJobCents >= 100 && perJobCents <= capCents)) throw new Error('The most for one job has to fit inside the limit')
+    const open = limitsFor().find((l) => l.clientId === u.id && LIMIT_OPEN.includes(l.status))
+    if (open?.status === 'awaiting_approval') Object.assign(open, { status: 'closed', closedAt: now(), closedReason: 'Never approved on PayPal', voidedCents: 0 })
+    else if (open) throw new Error('You already have a spending limit. End it before setting a new one.')
+    const l = {
+      id: uid('l'), clientId: u.id, status: 'awaiting_approval', capCents, perJobCents, currency: 'USD', note: String(note).trim().slice(0, 280),
+      endsAt: new Date(Date.now() + days * 864e5).toISOString(), createdAt: now(),
+      paypal: { orderId: `DEMO-ORD-${Math.random().toString(36).slice(2, 10).toUpperCase()}`, authorizationId: null },
+    }
+    limitsFor().unshift(l)
+    save()
+    return { id: l.id, orderId: l.paypal.orderId }
+  },
+  async authorizeSpendLimit(id) {
+    await wait(900)
+    const l = limitsFor().find((x) => x.id === id && x.clientId === me().id)
+    if (!l) throw new Error('Spending limit not found')
+    if (l.status === 'awaiting_approval') {
+      Object.assign(l, { status: 'active', authorizedAt: now(), holdExpiresAt: new Date(Date.now() + 29 * 864e5).toISOString() })
+      l.paypal.authorizationId = `DEMO-AUTH-${Math.random().toString(36).slice(2, 10).toUpperCase()}`
+      save()
+    }
+    return clone(limitView(l))
+  },
+  async endSpendLimit(id) {
+    await latency()
+    const l = limitsFor().find((x) => x.id === id && x.clientId === me().id)
+    if (!l) throw new Error('Spending limit not found')
+    if (l.status === 'awaiting_approval') Object.assign(l, { status: 'closed', closedAt: now(), closedReason: 'Never approved on PayPal', voidedCents: 0 })
+    if (l.status === 'active') Object.assign(l, { status: 'closing', closedReason: 'Ended by you' })
+    settleLimit(l)
+    save()
+    return clone(limitView(l))
+  },
+  async fundFromLimit(milestoneId) {
+    await wait(700)
+    const { c, m } = findMilestone(milestoneId)
+    if (assertParty(c) !== 'client') throw new Error('Only the client funds milestones.')
+    if (m.status !== 'awaiting_funding') throw new Error(`Milestone is ${m.status}`)
+    const l = limitsFor().find((x) => x.clientId === me().id && LIMIT_OPEN.includes(x.status))
+    if (!l) throw new Error('No spending limit is set up')
+    if (l.status !== 'active') throw new Error(l.status === 'awaiting_approval' ? 'The spending limit is waiting for its PayPal approval' : 'The spending limit has ended')
+    const hold = m.amountCents + (m.expenseBudgetCents || 0)
+    const job = c.milestones.reduce((s, x) => s + x.amountCents + (x.expenseBudgetCents || 0), 0)
+    if (job > l.perJobCents) throw new Error(`This job comes to ${money(job)}; the limit allows at most ${money(l.perJobCents)} for one job`)
+    const left = limitUse(l).availableCents
+    if (hold > left) throw new Error(`This hold is ${money(hold)}; the limit has ${money(left)} left`)
+    Object.assign(m, { status: 'funded', spendLimitId: l.id, fundedAt: now(), holdExpiresAt: l.holdExpiresAt })
+    m.authorizedAt = m.fundedAt
+    m.paypal.orderId = l.paypal.orderId
+    m.paypal.authorizationId = l.paypal.authorizationId
+    log(c, 'paypal', 'escrow.funds_held', { amountCents: hold, expenseBudgetCents: m.expenseBudgetCents || undefined, authorizationId: l.paypal.authorizationId, fromLimit: true, leftCents: left - hold }, m.id)
+    save()
+    return { status: 'funded', fromLimit: true, holdCents: hold, leftCents: left - hold }
+  },
+
   // ---- escrow (simulated PayPal sandbox)
   async createOrder(milestoneId) {
     await latency()
@@ -1084,7 +1186,7 @@ export const demo = {
     m.status = kept ? 'released' : 'refunded'
     m.voidedCents = m.amountCents - kept + unspent(m)
     if (kept) m.releasedAt = now()
-    log(c, 'paypal', 'escrow.refunded', { amountCents: m.voidedCents, keptCents: kept }, m.id)
+    log(c, 'paypal', 'escrow.refunded', { amountCents: m.voidedCents, keptCents: kept, toLimit: m.spendLimitId ? true : undefined }, m.id)
     closeExpenses(c, m)
     const next = c.milestones.find((x) => x.status === 'draft')
     if (next) next.status = 'awaiting_funding'

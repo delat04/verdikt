@@ -2,16 +2,18 @@
   FundModal — the client puts a milestone into escrow.
   Live: PayPal JS SDK buttons (intent=authorize) → our API creates the order, then authorizes it (a hold).
   Demo: a simulated PayPal sandbox approval, clearly labelled.
+  With a spending limit (one PayPal hold approved once), the hold can come from it instead: no new approval.
 -->
 <script setup>
-import { ref, watch, nextTick } from 'vue'
-import { ShieldCheck, Undo2, CalendarClock, Banknote, Receipt } from 'lucide-vue-next'
+import { ref, computed, watch, nextTick } from 'vue'
+import { ShieldCheck, Undo2, CalendarClock, Banknote, Receipt, Wallet } from 'lucide-vue-next'
 import VModal from './ui/VModal.vue'
 import VButton from './ui/VButton.vue'
 import { api, isDemo } from '@/services'
 import { money, split, FEE_PERCENT } from '@/domain/format'
 import { toast } from '@/composables/useToast'
 import { holdCents } from '@/domain/expenses'
+import { loadPayPal } from '@/lib/paypalSdk'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -28,23 +30,35 @@ const buttons = ref(null)
 const message = ref(null)
 const dark = () => document.documentElement.dataset.theme === 'dark' || (!document.documentElement.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches)
 
-function loadSdk() {
-  if (window.paypal) return Promise.resolve(window.paypal)
-  const clientId = import.meta.env.VITE_PAYPAL_CLIENT_ID
-  if (!clientId) return Promise.reject(new Error('VITE_PAYPAL_CLIENT_ID is not set'))
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script')
-    s.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}&intent=authorize&currency=${props.currency}&components=buttons,messages&enable-funding=paylater`
-    s.onload = () => resolve(window.paypal)
-    s.onerror = () => reject(new Error('Could not load PayPal'))
-    document.head.appendChild(s)
-  })
+// the spending limit, when there is an active one: the hold can come from it, no new approval
+const limit = ref(null)
+const limitBusy = ref(false)
+const fits = computed(() => !!limit.value && !!props.milestone && limit.value.availableCents >= holdCents(props.milestone))
+async function loadLimit() {
+  try {
+    const { current } = await api.listSpendLimits()
+    limit.value = current?.status === 'active' && current.currency === props.currency ? current : null
+  } catch {
+    limit.value = null
+  }
+}
+async function fromLimit() {
+  limitBusy.value = true
+  error.value = ''
+  try {
+    await api.fundFromLimit(props.milestone.id)
+    done(' from your spending limit')
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    limitBusy.value = false
+  }
 }
 
 async function renderButtons() {
   sdkError.value = ''
   try {
-    const paypal = await loadSdk()
+    const paypal = await loadPayPal(props.currency)
     await nextTick()
     if (!buttons.value) return
     buttons.value.innerHTML = ''
@@ -80,6 +94,7 @@ async function renderButtons() {
 
 watch(() => props.open, (o) => {
   error.value = ''
+  if (o) loadLimit()
   if (o && !isDemo) renderButtons()
 })
 
@@ -97,8 +112,8 @@ async function approveDemo() {
   }
 }
 
-function done() {
-  toast(`${money(holdCents(props.milestone), props.currency)} is held in escrow`, { tone: 'ok' })
+function done(from = '') {
+  toast(`${money(holdCents(props.milestone), props.currency)} is held in escrow${from}`, { tone: 'ok' })
   emit('funded')
   emit('close')
 }
@@ -116,6 +131,18 @@ function done() {
         <li v-if="milestone.expenseBudgetCents"><Receipt :size="16" :stroke-width="1.9" /> The expense budget ({{ (milestone.expenseCovers || []).join(', ') }}) is paid out only against receipts that pass the checks. You're never charged for what isn't spent.</li>
         <li v-if="FEE_PERCENT"><Banknote :size="16" :stroke-width="1.9" /> When it's released, the freelancer receives <span class="vk-num">{{ money(split(milestone.amountCents).net, currency) }}</span> in their PayPal — Verdikt keeps {{ FEE_PERCENT }}%. You pay nothing extra.</li>
       </ul>
+
+      <!-- the spending limit: already approved on PayPal, so nothing more to approve -->
+      <div v-if="limit" class="lim">
+        <div class="lim__head">
+          <span class="lim__title"><Wallet :size="16" :stroke-width="1.9" /> Your spending limit</span>
+          <span class="lim__left vk-num">{{ money(limit.availableCents, currency) }} left</span>
+        </div>
+        <p class="lim__sub">Already approved on PayPal{{ limit.note ? ` (“${limit.note}”)` : '' }}. This hold comes out of it, and goes back into it if the work fails.</p>
+        <VButton block size="lg" :icon="Wallet" :disabled="!fits || busy" :loading="limitBusy" @click="fromLimit">Hold {{ money(holdCents(milestone), currency) }} from my limit</VButton>
+        <p v-if="!fits" class="lim__sub">Not enough left in the limit. Approve this hold on its own below.</p>
+      </div>
+      <p v-if="limit" class="or vk-faint">or approve this hold on its own</p>
 
       <!-- demo: simulated PayPal sandbox -->
       <div v-if="isDemo" class="pp">
@@ -152,5 +179,12 @@ function done() {
 .pp__row { display: flex; justify-content: space-between; gap: 12px; font: var(--vk-type-dense); }
 .pp-live { min-height: 52px; }
 .pp-msg:not(:empty) { margin-top: 10px; }
+.lim { display: flex; flex-direction: column; gap: 10px; padding: 16px; border: 1px solid var(--vk-accent-line); border-radius: var(--vk-r-md); background: var(--vk-accent-soft); }
+.lim__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.lim__title { display: inline-flex; align-items: center; gap: 8px; font: var(--vk-type-dense); color: var(--vk-ink); }
+.lim__title svg { color: var(--vk-accent-text); }
+.lim__left { font: var(--vk-num-18); color: var(--vk-ink); }
+.lim__sub { margin: 0; font: var(--vk-type-small); color: var(--vk-ink-2); }
+.or { margin: 14px 0 10px; text-align: center; font: var(--vk-type-small); }
 .fund__busy { display: flex; align-items: center; gap: 8px; font: var(--vk-type-small); }
 </style>

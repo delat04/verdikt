@@ -5,6 +5,8 @@
                to the freelancer through PayPal Payouts, minus Verdikt's fee
     refund   — void the hold; the client is never charged
     renew    — reauthorize holds past PayPal's 3-day honor period, before they lapse
+    A milestone funded from a spending limit (lib/limits.js) shares the limit's hold: it is captured with
+    final_capture=false and never voided on its own — the limit voids what's left when it ends.
     and what happens to the contract after: the next milestone opens, or it completes.
     ============================================================================ */
 
@@ -12,6 +14,7 @@ import * as paypal from './paypal.js'
 import { db, audit } from './supabase.js'
 import { config } from '../config.js'
 import { money } from './money.js'
+import { settleLimit } from './limits.js'
 
 export const HELD = ['funded', 'submitted', 'verifying', 'passed', 'failed', 'disputed']
 const HONOR_MS = 3 * 864e5
@@ -46,22 +49,26 @@ export async function release(milestone, actor, { amountCents, final = true, pas
   const releasedNow = already + cents
   const currency = milestone.contract?.currency || 'USD'
   // read fresh: an expense reimbursed meanwhile is a capture on the same hold
-  const { data: fresh } = await db().from('milestones').select('tranches, expense_budget_cents').eq('id', milestone.id).single()
+  const { data: fresh } = await db().from('milestones').select('tranches, expense_budget_cents, spend_limit_id').eq('id', milestone.id).single()
   const tranches = fresh?.tranches ?? milestone.tranches ?? []
   const budget = fresh?.expense_budget_cents || 0
+  const limitId = fresh?.spend_limit_id || null
   const index = tranches.length
 
   const capture = await paypal.captureAuthorization(milestone.paypal_authorization_id, {
     requestId: `release-${milestone.id}-${index}`,
-    // the hold also carries the expense budget: always name the amount, so the work never takes the budget with it
-    amountCents: final && !already && cents === full && !budget ? undefined : cents,
+    // the hold also carries the expense budget (or a whole spending limit): always name the amount, so the work never takes more
+    amountCents: final && !already && cents === full && !budget && !limitId ? undefined : cents,
     currency,
-    finalCapture: final,
-    noteToPayer: !final
-      ? `Verdikt: ${money(cents, currency)} released for ${milestone.title} — ${passed} of ${total} checks passed; the rest stays on hold`
-      : releasedNow < full
-        ? `Verdikt: ${money(releasedNow, currency)} of ${money(full, currency)} released for ${milestone.title}; the rest of the hold is returned to you`
-        : `Verdikt: ${milestone.title} passed its checks${budget ? '; any unused expense budget is returned to you' : ''}`,
+    // a spending limit's hold backs the agent's other jobs too: it stays open, and closes when the limit ends
+    finalCapture: final && !limitId,
+    noteToPayer: limitId
+      ? `Verdikt: ${money(cents, currency)} for ${milestone.title}, from your agent's spending limit — ${!final ? `${passed} of ${total} checks passed` : 'its checks passed'}; the rest of the limit stays on hold`
+      : !final
+        ? `Verdikt: ${money(cents, currency)} released for ${milestone.title} — ${passed} of ${total} checks passed; the rest stays on hold`
+        : releasedNow < full
+          ? `Verdikt: ${money(releasedNow, currency)} of ${money(full, currency)} released for ${milestone.title}; the rest of the hold is returned to you`
+          : `Verdikt: ${milestone.title} passed its checks${budget ? '; any unused expense budget is returned to you' : ''}`,
   })
   // a final capture closes the authorization: what's left of the expense budget goes back with it
   const unspent = final && budget ? budget - await spentOn(milestone.id) : 0
@@ -76,9 +83,10 @@ export async function release(milestone, actor, { amountCents, final = true, pas
   await audit({
     contractId: milestone.contract_id, milestoneId: milestone.id, actor: actor === 'agent' ? 'paypal' : actor,
     event: !final ? 'escrow.check_released' : releasedNow < full ? 'escrow.partially_released' : 'escrow.released',
-    payload: { captureId: capture.id, status: capture.status, amountCents: cents, releasedCents: releasedNow, ofCents: full, returnedCents: final ? full - releasedNow + unspent : 0, unspentExpensesCents: unspent || undefined, passed, total, by: actor },
+    payload: { captureId: capture.id, status: capture.status, amountCents: cents, releasedCents: releasedNow, ofCents: full, returnedCents: final ? full - releasedNow + unspent : 0, unspentExpensesCents: unspent || undefined, passed, total, by: actor, fromLimit: limitId ? true : undefined },
   })
   if (final) await closeExpenses(milestone)
+  if (final && limitId) await settleLimit(limitId).catch(() => {})
 
   // Paying the freelancer is a second step: if it can't happen yet (no payout email), the release still stands
   await payout(milestone.id).catch((e) => audit({
@@ -226,7 +234,10 @@ export async function resumePayouts() {
  * milestone that already released some tranches, the freelancer keeps those and the rest is returned.
  */
 export async function refund(milestone, actor) {
-  await paypal.voidAuthorization(milestone.paypal_authorization_id, { requestId: `refund-${milestone.id}` })
+  const { data: fresh } = await db().from('milestones').select('spend_limit_id').eq('id', milestone.id).single()
+  const limitId = fresh?.spend_limit_id || null
+  // a spending limit's hold backs other jobs too: this job's share is freed for the agent, the hold stays
+  if (!limitId) await paypal.voidAuthorization(milestone.paypal_authorization_id, { requestId: `refund-${milestone.id}` })
   const kept = milestone.released_cents || 0
   // reimbursed expenses stand; the rest of the budget is voided with the work
   const unspent = (milestone.expense_budget_cents || 0) - await spentOn(milestone.id)
@@ -234,8 +245,9 @@ export async function refund(milestone, actor) {
   await db().from('milestones').update({
     status: kept ? 'released' : 'refunded', progress: null, voided_cents: returned, ...(kept ? { released_at: new Date().toISOString() } : {}),
   }).eq('id', milestone.id)
-  await audit({ contractId: milestone.contract_id, milestoneId: milestone.id, actor, event: 'escrow.refunded', payload: { amountCents: returned, keptCents: kept } })
+  await audit({ contractId: milestone.contract_id, milestoneId: milestone.id, actor, event: 'escrow.refunded', payload: { amountCents: returned, keptCents: kept, toLimit: limitId ? true : undefined } })
   await closeExpenses(milestone)
+  if (limitId) await settleLimit(limitId).catch(() => {})
   await advance(milestone.contract_id)
 }
 
@@ -344,6 +356,7 @@ export async function renewHolds() {
   const { data: list } = await db().from('milestones')
     .select('id, contract_id, title, status, amount_cents, paypal_authorization_id, authorized_at, hold_expires_at, reauthorized_at, contract:contracts(currency)')
     .in('status', HELD).not('paypal_authorization_id', 'is', null).is('reauthorized_at', null)
+    .is('spend_limit_id', null)   // a spending limit's shared hold is never reauthorized for one job (that would replace it for all)
   const now = Date.now()
   for (const m of list || []) {
     if (!m.authorized_at || now - new Date(m.authorized_at).getTime() < HONOR_MS) continue

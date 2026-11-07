@@ -18,7 +18,9 @@ import changeRoutes from './routes/changes.js'
 import verifierRoutes from './routes/verifier.js'
 import expenseRoutes, { resumeExpenses } from './routes/expenses.js'
 import jobRoutes from './routes/jobs.js'
+import limitRoutes from './routes/limits.js'
 import { renewHolds, resumePayouts } from './lib/flow.js'
+import { closeEndedLimits } from './lib/limits.js'
 import { syncDisputes } from './agent/defense.js'
 import { resumeVerifications } from './agent/verify.js'
 import { resumeAppeals } from './agent/appeal.js'
@@ -62,6 +64,7 @@ await app.register(changeRoutes, { prefix: '/api' })
 await app.register(verifierRoutes, { prefix: '/api' })
 await app.register(expenseRoutes, { prefix: '/api' })
 await app.register(jobRoutes, { prefix: '/api' })
+await app.register(limitRoutes, { prefix: '/api' })
 await app.register(agentRoutes, { prefix: '/api' })
 // any AI agent can use Verdikt with a personal token: Streamable HTTP MCP at /mcp
 await app.register(mcpRoutes)
@@ -87,7 +90,8 @@ if (webDist && existsSync(webDist)) {
 
 await app.listen({ port: config.port, host: '0.0.0.0' })
 
-// Background care for the money: renew holds past PayPal's 3-day honor period, and look for new
+// Background care for the money: renew holds past PayPal's 3-day honor period, close spending limits past
+// their end date (voiding what was never captured), and look for new
 // PayPal disputes (webhooks do this instantly once deployed; locally the timer covers it)
 const every = (ms, fn, label) => {
   const run = () => fn().catch((e) => app.log.warn({ err: e.message }, `${label} failed`))
@@ -95,6 +99,7 @@ const every = (ms, fn, label) => {
   setInterval(run, ms)
 }
 every(30 * 60_000, renewHolds, 'hold renewal')
+every(30 * 60_000, closeEndedLimits, 'spending limit close')
 every(10 * 60_000, syncDisputes, 'dispute sync')
 
 // Work that a restart interrupted picks up where it left off: checks, second reviews, payouts in flight, expense claims

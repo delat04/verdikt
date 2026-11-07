@@ -41,6 +41,7 @@ function mapContract(c) {
     releasedCents: m.released_cents, voidedCents: m.voided_cents, feeCents: m.fee_cents, payoutCents: m.payout_cents,
     payoutEmail: m.payout_email, payoutStatus: m.payout_status, paidOutAt: m.paid_out_at, tranches: m.tranches || [],
     expenseBudgetCents: m.expense_budget_cents || 0, expenseCovers: m.expense_covers || [],
+    spendLimitId: m.spend_limit_id || null,
     expenses: [...(m.expenses || [])].sort((a, b) => a.created_at.localeCompare(b.created_at)).map((e) => ({
       id: e.id, amountCents: e.amount_cents, merchant: e.merchant, purpose: e.purpose, receiptName: e.receipt_name, receiptType: e.receipt_type,
       status: e.status, decidedBy: e.decided_by, note: e.note, tokens: e.tokens, checks: e.checks || [], extracted: e.extracted || {},
@@ -132,6 +133,7 @@ export const live = {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, fn)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, fn)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'job_applications' }, fn)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'spend_limits' }, fn)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'audit_log' }, fn)
       .subscribe()
     const { data } = supabase.auth.onAuthStateChange(() => fn())
@@ -213,6 +215,13 @@ export const live = {
   // ---- escrow (PayPal Orders v2: AUTHORIZE → capture / void)
   createOrder: (milestoneId) => call(`/milestones/${milestoneId}/fund`),
   authorizeOrder: (milestoneId) => call(`/milestones/${milestoneId}/authorize`),
+  fundFromLimit: (milestoneId) => call(`/milestones/${milestoneId}/fund-from-limit`),
+
+  // ---- spending limit: one PayPal hold the person approves once; their agent hires within it
+  listSpendLimits: () => call('/spend-limits', { method: 'GET' }),
+  createSpendLimit: (body) => call('/spend-limits', { body }),
+  authorizeSpendLimit: (id) => call(`/spend-limits/${id}/authorize`),
+  endSpendLimit: (id) => call(`/spend-limits/${id}/end`),
   release: (milestoneId, { amountCents } = {}) => call(`/milestones/${milestoneId}/release`, { body: amountCents ? { amountCents } : {} }),
   refund: (milestoneId) => call(`/milestones/${milestoneId}/refund`),
   retryPayout: (milestoneId) => call(`/milestones/${milestoneId}/payout`),

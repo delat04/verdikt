@@ -3,7 +3,9 @@
     POST /mcp (Streamable HTTP, stateless, JSON responses) with `Authorization: Bearer vk_…`
     (a personal agent token from Settings). Every tool runs through the same API routes a person
     uses, as that person, so the rules are identical; what the agent says is labelled as theirs.
-    Money still needs the person: fund_milestone returns a PayPal link the person approves.
+    Money needs the person once: either they approve each hold on PayPal (fund_milestone returns the link), or
+    they set a spending limit in the app — one PayPal hold — and fund_milestone holds each job from it directly,
+    within the total, the most per job and the end date they chose. Either way money moves only on passing checks.
     ============================================================================ */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -29,7 +31,14 @@ hire_applicant — that opens a contract room with both sides. A freelancer's ag
 scout_opportunities for public posts elsewhere and offer to do them through Verdikt.
 
 Client agent: open_contract_room → share the invite → read_room / say_in_room (or delegate_negotiation) →
-accept_terms → sign_terms → fund_milestone (the person approves the PayPal hold) → confirm_hold → wait_for_verdict.
+accept_terms → sign_terms → fund_milestone → wait_for_verdict.
+
+Money: call get_spending_limit first. If your person set a spending limit (one PayPal hold they approved once in the
+app), fund_milestone holds the milestone from it at once — no link, no waiting — as long as the job fits: the total
+left, the most for one job, and the end date. Their note says what the limit is for: stay inside it. Without a limit
+(or when a job doesn't fit), fund_milestone returns a PayPal link your person must approve, then call confirm_hold.
+Either way the money is held, not paid: PayPal captures it only when the signed checks pass; a failed job frees its
+share of the limit, and whatever the limit never spends is voided, never charged. You can't create or raise a limit.
 Freelancer (coding) agent: get_checks → build → precheck_delivery (free dry run; repeat until nothing fails) →
 ask_verifier if a check is unclear → submit_delivery → wait_for_verdict → if a check fails, fix it and submit again.
 
@@ -144,11 +153,37 @@ function buildServer(app, auth, user) {
     contract_id: z.string(),
   }, async ({ contract_id }) => api('POST', `/contracts/${contract_id}/sign`))
 
-  tool('fund_milestone', 'Client only: create the PayPal escrow order for a milestone. Returns a PayPal link the PERSON must open to approve the hold — an agent can’t approve money.', {
+  tool('get_spending_limit', 'Client side: the spending limit your person approved for you (one PayPal hold): how much is left, the most for any one job, when it ends, what it is for, and every job it is holding or has paid for. null when there is none — then each hold needs your person’s approval on PayPal.', {}, async () => {
+    const { current } = await api('GET', '/spend-limits')
+    if (!current || current.status === 'closed') return { limit: null, note: 'No spending limit: fund_milestone returns a PayPal link your person approves for each hold. They can set a limit in the app (Settings → Spending limit).' }
+    const cur = current.currency
+    return {
+      status: current.status, left: money(current.availableCents, cur), left_cents: current.availableCents, total: money(current.capCents, cur),
+      most_per_job: money(current.perJobCents, cur), ends: current.endsAt, for: current.note || null,
+      paid_for_passing_work: money(current.capturedCents, cur), held_for_jobs: money(current.reservedCents, cur),
+      jobs: current.holds.map((h) => ({ contract: h.contract, milestone: h.title, held: money(h.holdCents, cur), paid: money(h.capturedCents, cur), status: h.status })),
+      ...(current.status !== 'active' && { note: current.status === 'awaiting_approval' ? 'Your person hasn’t approved it on PayPal yet.' : 'It is ending: no new holds; it closes once its jobs settle.' }),
+    }
+  }, { readOnlyHint: true })
+
+  tool('fund_milestone', 'Client only: put a milestone into PayPal escrow. With an active spending limit that fits the job (total left, most per job, end date), the hold is placed from it at once and nothing else is needed. Otherwise returns a PayPal link the PERSON must open to approve the hold — an agent can’t approve money — then call confirm_hold.', {
     milestone_id: z.string(),
-  }, async ({ milestone_id }) => {
+    use_limit: z.boolean().optional().describe('Default true: hold from the spending limit when there is one and the job fits it. false always asks the person on PayPal.'),
+  }, async ({ milestone_id, use_limit = true }) => {
+    let why = null
+    if (use_limit) {
+      try {
+        const r = await api('POST', `/milestones/${milestone_id}/fund-from-limit`)
+        return { held: true, from: 'your person’s spending limit', held_cents: r.holdCents, limit_left_cents: r.leftCents, next: 'Nothing to approve: the money is held. The freelancer can deliver; call wait_for_verdict after they submit.' }
+      } catch (e) {
+        why = e.message
+      }
+    }
     const r = await api('POST', `/milestones/${milestone_id}/fund`)
-    return { paypal_order: r.orderId, approve_link: r.approveUrl, next: 'Give this link to your person. After they approve on PayPal, call confirm_hold (the app also confirms it when they return).' }
+    return {
+      ...(why && why !== 'No spending limit is set up' && { not_from_limit: why }),
+      paypal_order: r.orderId, approve_link: r.approveUrl, next: 'Give this link to your person. After they approve on PayPal, call confirm_hold (the app also confirms it when they return).',
+    }
   })
 
   tool('confirm_hold', 'Client only: after the person approved on PayPal, place the hold (PayPal authorization). The money is held, not charged.', {
