@@ -1,23 +1,26 @@
 <!--
   Home. The head stays put — the word, the one action (New contract) and the three numbers that
   matter (held · paid · on you); it tightens once you scroll. Below it two columns scroll on their own:
-  main — Up next (the one cobalt card), invitations, then every contract; the filter bar sticks
+  main — Up next (the one cobalt card), invitations, then every contract as cards or on the money
+         timeline; the filter bar sticks
   side — the money held across contracts, an invite-code box, the ledger
 -->
 <script setup>
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
-import { Plus, KeyRound, FileText, Search, X, ArrowRight, ArrowUpRight, Briefcase } from 'lucide-vue-next'
+import { useRouter, useRoute } from 'vue-router'
+import { Plus, KeyRound, FileText, Search, X, ArrowRight, ArrowUpRight, Briefcase, LayoutGrid, ChartGantt } from 'lucide-vue-next'
 import AppShell from '@/layouts/AppShell.vue'
 import VButton from '@/components/ui/VButton.vue'
 import VCard from '@/components/ui/VCard.vue'
 import VChips from '@/components/ui/VChips.vue'
+import VSegmented from '@/components/ui/VSegmented.vue'
 import VNotchCard from '@/components/ui/VNotchCard.vue'
 import VAvatar from '@/components/ui/VAvatar.vue'
 import VPill from '@/components/ui/VPill.vue'
 import VEmptyState from '@/components/ui/VEmptyState.vue'
 import NextStepCard from '@/components/NextStepCard.vue'
 import ContractCard from '@/components/ContractCard.vue'
+import MoneyTimeline from '@/components/MoneyTimeline.vue'
 import EscrowCard from '@/components/EscrowCard.vue'
 import ActivityFeed from '@/components/ActivityFeed.vue'
 import { ACTION } from '@/components/actionMeta'
@@ -30,11 +33,15 @@ import { nextStep, roleOf, counterparty, contractTotals } from '@/domain/milesto
 
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
 
 const { data, loading, error } = useLive(async () => {
-  const [contracts, invites, jobs] = await Promise.all([api.listContracts(), api.listInvites(), api.listJobs().catch(() => null)])
-  return { contracts, invites, jobs }
+  const [contracts, invites, jobs, limits] = await Promise.all([
+    api.listContracts(), api.listInvites(), api.listJobs().catch(() => null), api.listSpendLimits().catch(() => null),
+  ])
+  return { contracts, invites, jobs, limits }
 })
+const limit = computed(() => data.value?.limits?.current || null)
 
 const rows = computed(() => (data.value?.contracts || []).map((c) => {
   const role = roleOf(c, auth.user?.id)
@@ -113,6 +120,16 @@ function toggleSearch() {
   searching.value = !searching.value
   if (!searching.value) q.value = ''
 }
+
+// ---- cards or the timeline; the choice sticks in this browser, and ?view=timeline opens straight onto it
+const LAYOUT_KEY = 'verdikt-contracts-layout'
+const storedLayout = (() => { try { return localStorage.getItem(LAYOUT_KEY) } catch { return null } })()
+const layout = ref([route.query.view, storedLayout].includes('timeline') ? 'timeline' : 'cards')
+watch(layout, (v) => { try { localStorage.setItem(LAYOUT_KEY, v) } catch { /* private window */ } })
+const layouts = [
+  { value: 'cards', icon: LayoutGrid, label: 'Cards' },
+  { value: 'timeline', icon: ChartGantt, label: 'Timeline' },
+]
 
 // ---- scrolling: the head condenses; the filter bar sticks and shows a hairline once it does
 const { root, scrolled, condensed } = useSplitScroll({ room: 110 })   // the head shrinks ~45px here
@@ -257,12 +274,14 @@ async function sample() {
                   <input v-if="searching" v-model="q" class="find__input" placeholder="Title or name" aria-label="Find a contract" autofocus @keydown.esc="toggleSearch" />
                 </div>
                 <VChips v-model="filter" :options="chips" label="Filter contracts" />
+                <VSegmented v-model="layout" :options="layouts" label="Show contracts as" class="layout" />
               </div>
             </div>
 
             <div v-if="loading" class="cards">
               <div v-for="i in 2" :key="i" class="vk-skel" style="height: 280px; border-radius: var(--vk-r-xl)" />
             </div>
+            <MoneyTimeline v-else-if="shown.length && layout === 'timeline'" :rows="shown" :limit="limit" class="vk-rise" />
             <TransitionGroup v-else-if="shown.length" tag="div" name="vk-list" class="cards">
               <ContractCard v-for="r in shown" :key="r.c.id" :row="r" />
             </TransitionGroup>
@@ -319,6 +338,7 @@ async function sample() {
 .block__title { display: flex; align-items: baseline; gap: 14px; margin: 0; font: 400 26px/32px var(--vk-font); letter-spacing: -.025em; }
 .block__n { font: 400 13px/1 var(--vk-font); color: var(--vk-muted); text-decoration: underline; text-underline-offset: 5px; text-decoration-color: var(--vk-line-strong); }
 .block__tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.layout :deep(.vk-seg__btn) { height: 36px; }   /* level with the 44px chips */
 
 /* the filter bar sticks to the top of the column; a hairline marks it once it does */
 .sentinel { display: block; height: 1px; margin-bottom: -1px; }

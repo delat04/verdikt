@@ -1635,6 +1635,7 @@ export const demo = {
     s1.verdict = { id: uid('v'), outcome: 'pass', confidence: 0.97, createdAt: t(5.1), summary: demoSummary(r1, m1.criteria, false), results: r1, engine: engineOf(r1, 19400) }
     m1.submissions = [s1]
     m2.fundedAt = t(4); m2.authorizedAt = t(4); m2.holdExpiresAt = new Date(Date.now() + 25 * 864e5).toISOString()
+    m2.reauthorizedAt = t(1)   // the honor period ended, so Verdikt renewed the hold, as the server's renewHolds does
     m2.paypal = { orderId: 'DEMO-ORD-3PL0VX', authorizationId: 'DEMO-AUTH-9KD2RE' }
     const s2 = { id: uid('s'), attempt: 1, liveUrl: 'https://northbrew-shop-v1.vercel.app', repoUrl: 'https://github.com/okafor-studio/northbrew-shop', notes: 'First pass of the shop.', createdAt: t(0.3) }
     s2.verdict = null
