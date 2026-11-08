@@ -97,7 +97,7 @@ function onSheetKey(e) {
     >
       <div class="sheet__grid" aria-hidden="true"><span v-for="n in 6" :key="n" /></div>
       <header class="sheet__top">
-        <span class="sheet__brand" aria-hidden="true"><BrandMark :size="28" /> Verdikt</span>
+        <span class="sheet__brand" aria-hidden="true"><BrandMark :size="30" /> Verdikt</span>
         <button ref="closeBtn" class="sheet__close" type="button" @click="open = false">
           Close <X :size="15" :stroke-width="1.8" aria-hidden="true" />
         </button>

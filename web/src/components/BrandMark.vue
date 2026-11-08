@@ -1,11 +1,14 @@
-<!-- BrandMark — the V: outer stroke in ink (currentColor), inner chevron in accent. -->
+<!-- BrandMark — the Verdikt mark: the work's stroke in ink (currentColor, so it turns white on dark), and the money's
+     stroke that crosses it in accent. `tile` sets it on its own dark tile, as in the favicon. -->
 <script setup>
-defineProps({ size: { type: Number, default: 28 } })
+import { MARK, ACCENT, TILE } from './markPaths'
+defineProps({ size: { type: Number, default: 28 }, tile: { type: Boolean, default: false } })
 </script>
 
 <template>
-  <svg :width="size" :height="size" viewBox="0 0 64 64" fill="none" aria-hidden="true">
-    <path d="M10 14 L32 54 L54 14" stroke="currentColor" stroke-width="4.5" stroke-linejoin="round" stroke-linecap="round" />
-    <path d="M21 14 L32 34 L43 14" stroke="var(--vk-accent)" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round" />
+  <svg :width="size" :height="size" viewBox="0 0 80 80" fill="none" aria-hidden="true">
+    <rect v-if="tile" width="80" height="80" rx="18" :fill="TILE" />
+    <path :d="MARK.work" :fill="tile ? '#FFFFFF' : 'currentColor'" />
+    <path :d="MARK.pay" :fill="ACCENT" />
   </svg>
 </template>

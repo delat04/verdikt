@@ -1,14 +1,15 @@
 <!--
   Landing. The hero is the machine (HeroMachine, after the Aeon landing's): deliveries ride a belt into a glass
-  press that checks and stamps each one, and they leave paid, or held. Then the hold itself: a dark glass card on a
-  near-white grid of tiles with a line of cobalt light through it (the money PayPal holds), arriving with the story.
-  Scroll and the page pins while the card goes through the four real stages: the checks are signed, PayPal holds the money, an agent reads down the checks,
-  and when the last passes the light turns green and runs off the card.
+  press that checks and stamps each one, and they leave paid, or held. Then the deal itself: the Verdikt mark in 3D
+  on a near-white grid of tiles, its white stroke the work and its lime stroke the money, arriving with the story.
+  Scroll and the page pins while the mark goes through the four real stages: a line drawing while the checks are
+  signed, the money lime glass while PayPal holds it, the work turning solid as a scan reads down it, and the
+  money solid lime when it's paid, with green rings running out from it.
   Then the two sides, and the product end to end (LandingPipeline: one job from the brief to the payout, pinned for
   six screens), whose window grows into the closing section (LandingClose); the footer is the one dark band.
-  Motion: Lenis smooths the scroll, GSAP ScrollTrigger drives the story, three.js draws the night and the card
+  Motion: Lenis smooths the scroll, GSAP ScrollTrigger drives the story, three.js draws the paper and the mark
   (src/landing/stage.js, loaded after first paint). Reduced motion keeps the story but drops smoothing,
-  the intro, drifting and pointer tilt; without WebGL a CSS card stands in.
+  the intro, drifting and pointer tilt; without WebGL the flat mark stands in.
 -->
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
@@ -51,6 +52,14 @@ const storyAnchor = ref(null)
 const storyText = ref(null)
 const active = ref(0)
 const progress = ref(0)
+// the caption under the mark: the amount, and what it's doing at this step (the scan settles a check a quarter of the way down)
+const tag = computed(() => {
+  if (active.value === 0) return '4 checks signed, nothing held yet'
+  if (active.value === 1) return 'held by PayPal, not charged'
+  if (active.value === 3) return 'sent to Sam’s PayPal'
+  const passed = Math.min(4, Math.floor(Math.min(1, Math.max(0, (progress.value - 0.5) / 0.22)) * 4))
+  return `${passed} of 4 checks passed`
+})
 const navShown = ref(false)
 const navOnDark = ref(false)
 const menuOpen = ref(false)
@@ -64,7 +73,7 @@ let alive = true
 const lerp = (a, b, t) => a + (b - a) * t
 const ease = (t) => t * t * (3 - 2 * t)
 
-// the paper's light (and which text column stays calm) moves from the hero's machine to the story's card
+// the paper's light (and which text column stays calm) moves from the hero's machine to the story's mark
 function between(a, b) {
   const t = ease(st.blend)
   const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect()
@@ -76,7 +85,7 @@ function tick(time) {
   // the floating bar comes in once the hero, and its own bar, have mostly scrolled away
   navShown.value = window.scrollY > window.innerHeight * 0.75
   if (!stage || !heroFigure.value || !storyAnchor.value || st.fade <= 0) return
-  // the card lives in the story: it arrives with it, its line drawing as the section scrolls in
+  // the mark lives in the story: it arrives with it, still a line drawing, as the section scrolls in
   stage.frame({
     rect: storyAnchor.value.getBoundingClientRect(),
     glow: between(heroFigure.value, storyAnchor.value),
@@ -114,7 +123,7 @@ onMounted(async () => {
       intro.from('.top', { autoAlpha: 0, y: -10, duration: 1.2, ease: 'power3.out' }, 0.5)
     }
 
-    // the story arrives: the card with it, the paper's light moving from the machine to the card
+    // the story arrives: the mark with it, the paper's light moving from the machine to the mark
     ScrollTrigger.create({ trigger: story.value, start: 'top bottom', end: 'top top', onUpdate: (s) => { st.blend = s.progress } })
     // the story: pinned for three screens, four steps
     ScrollTrigger.create({
@@ -205,7 +214,7 @@ onBeforeUnmount(() => {
       <a href="#how" class="hero__cue" @click.prevent="go('#how')"><i aria-hidden="true" />See how a payment moves</a>
     </section>
 
-    <!-- the story: pinned, the card goes through the four stages -->
+    <!-- the story: pinned, the mark goes through the four stages -->
     <section id="how" ref="story" class="story" aria-label="How a payment moves">
       <div class="wrap story__grid">
         <div ref="storyText" class="story__text">
@@ -219,11 +228,13 @@ onBeforeUnmount(() => {
             </article>
           </div>
         </div>
-        <div ref="storyAnchor" class="anchor story__anchor" aria-hidden="true">
-          <div v-if="noGL" class="still" :class="{ 'is-paid': active === 3 }">
-            <span class="still__amt">{{ active === 3 ? '$1,764.00' : '$1,800.00' }}</span>
-            <span class="still__cap">{{ active === 3 ? 'sent to Sam’s PayPal' : steps[active].label }}</span><i class="still__seam" />
-          </div>
+        <div ref="storyAnchor" class="anchor story__anchor">
+          <BrandMark v-if="noGL" class="still" :size="160" />
+          <!-- what the money is doing, under the mark -->
+          <p class="tag" :class="{ 'is-paid': active === 3 }">
+            <span class="tag__amt">{{ active === 3 ? '$1,764.00' : '$1,800.00' }}</span>
+            <span class="tag__cap">{{ tag }}</span>
+          </p>
         </div>
       </div>
     </section>
@@ -260,7 +271,7 @@ onBeforeUnmount(() => {
     <div class="band is-dark">
       <footer class="foot">
         <div class="wrap foot__row">
-          <span class="foot__brand"><BrandMark :size="20" /> Verdikt</span>
+          <span class="foot__brand"><BrandMark :size="22" /> Verdikt</span>
           <span>Built on PayPal Orders v2 and Payouts, Claude and Supabase. PayPal sandbox only, so no real money moves.</span>
           <RouterLink to="/design">Design system</RouterLink>
         </div>
@@ -287,7 +298,7 @@ html.is-landing, html.is-landing body { background: #f7f8fa; color-scheme: light
 </style>
 
 <style scoped>
-/* the landing is light, whatever the device theme: the app's own light tokens. Colour lives in the card,
+/* the landing is light, whatever the device theme: the app's own light tokens. Colour lives in the mark,
    in one dark panel (the agent's session) and in the closing band, never washed across the page. */
 .land {
   --vk-canvas: #F7F8FA; --vk-surface: #FFFFFF; --vk-surface-2: #F1F3F6; --vk-raised: #FFFFFF;
@@ -398,13 +409,14 @@ html.is-landing, html.is-landing body { background: #f7f8fa; color-scheme: light
 .foot__brand { display: inline-flex; align-items: center; gap: 8px; color: var(--vk-ink); font: 400 15px/1 var(--vk-font); }
 .foot__row a { margin-left: auto; color: var(--vk-muted); }
 
-/* without WebGL, a still card holds the place */
-.still { position: relative; display: flex; flex-direction: column; justify-content: center; gap: 10px; height: 100%; padding: 0 9%; border: 1px solid var(--vk-line-strong); border-radius: 22px; background: linear-gradient(160deg, #0d1530, #04060c); overflow: hidden; }
-.still__amt { font: 400 clamp(32px, 4vw, 56px)/1 var(--vk-mono); }
-.still__cap { font: var(--vk-type-body); color: var(--vk-accent-text); }
-.still__seam { position: absolute; left: 0; right: 0; bottom: 22%; height: 1px; background: var(--vk-accent); box-shadow: 0 0 16px 2px rgba(49, 94, 251, .7); }
-.still.is-paid .still__cap { color: var(--vk-ok-ink); }
-.still.is-paid .still__seam { background: var(--vk-ok); box-shadow: 0 0 16px 2px rgba(59, 227, 122, .6); }
+/* the caption under the mark */
+.story__anchor { position: relative; }
+.tag { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: center; align-items: baseline; gap: 12px; margin: 0; white-space: nowrap; }
+.tag__amt { font: 400 22px/1 var(--vk-mono); letter-spacing: -.02em; color: var(--vk-ink); }
+.tag__cap { font: var(--vk-type-dense); color: var(--vk-muted); }
+.tag.is-paid .tag__cap { color: var(--vk-ok-ink); }
+/* without WebGL, the flat mark holds the place */
+.still { position: absolute; left: 50%; top: 44%; width: auto; height: 62%; transform: translate(-50%, -50%); }
 
 :focus-visible { outline: 2px solid var(--vk-accent-text); outline-offset: 3px; }
 
@@ -417,7 +429,7 @@ html.is-landing, html.is-landing body { background: #f7f8fa; color-scheme: light
   .hero__figure { width: auto; margin: 40px calc(-1 * var(--gut)) 0; -webkit-mask-image: linear-gradient(118deg, transparent 4%, #000 22% 78%, transparent 96%); mask-image: linear-gradient(118deg, transparent 4%, #000 22% 78%, transparent 96%); }
   .story { height: 100svh; }
   .story__grid { align-content: center; gap: 28px; }
-  .story__anchor { order: -1; width: 86%; margin: 0 auto; }
+  .story__anchor { order: -1; width: 92%; margin: 0 auto; aspect-ratio: 1.3; }
   .rail { margin-bottom: 26px; }
   .step__text { font-size: 16px; line-height: 25px; }
   .sides__grid { grid-template-columns: 1fr; }

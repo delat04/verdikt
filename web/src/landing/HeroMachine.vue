@@ -47,7 +47,7 @@
       <Solid :s="frame.press.ink" />
       <Solid :s="frame.press.head" />
       <g :transform="topPlane(frame.press.top, S)">
-        <g transform="translate(-0.42 -0.42) scale(0.0131)">
+        <g transform="translate(-0.42 -0.42) scale(0.0105)">
           <path v-for="(d, k) in MARK" :key="k" class="hm-piece" :class="{ 'is-lit': k < frame.lit }" :d="d" />
         </g>
       </g>
@@ -108,7 +108,7 @@
  * The hero, after the Aeon landing's in/out machine: Verdikt in one picture. Deliveries of every
  * kind Verdikt checks (a live site, a repo, design files, copy, a receipt) ride a belt into a glass
  * press. The belt indexes: it moves one station and stops. Under the press the delivery is scanned
- * against its signed checks (the V on the press lights up, the dial counts checks passed, the three
+ * against its signed checks (the mark on the press lights up, the dial counts checks passed, the three
  * ways a check is settled fill), then the press comes down and stamps the verdict. It leaves with a
  * cobalt chip and the amount paid, or, one time in four when a check fails, a grey one: held.
  *
@@ -121,6 +121,7 @@ import { Globe, GitBranch, PenTool, FileText, ReceiptText, Check, X } from 'luci
 import { facets, footprint, iso, poly, solid, topPlane, xFace, yFace } from './isoKit.js'
 import { clamp, easeInOut, easeOut } from './landingMath.js'
 import { playStamp } from './machineSound.js'
+import { MARK as MARK_PATHS } from '@/components/markPaths'
 
 const S = 10 // px per world unit
 const VIEWBOX = '-104 -80 208 156'
@@ -167,8 +168,8 @@ const BELT = { top: 'var(--m-belt-top)', left: 'var(--m-belt-left)', right: 'var
 const ITEM = { top: 'var(--m-item-top)', left: 'var(--m-item-left)', right: 'var(--m-item-right)' }
 const INK = { top: 'var(--m-signal)', left: 'var(--m-signal)', right: 'var(--m-signal-ink)' }
 
-/* the V of the Verdikt mark, in four strokes (viewBox 64), lit outer left, inner, outer right */
-const MARK = ['M10 14 L32 54', 'M21 14 L32 34', 'M32 34 L43 14', 'M32 54 L54 14']
+/* the Verdikt mark engraved on the press (viewBox 80): the work lights first, then the money */
+const MARK = [MARK_PATHS.work, MARK_PATHS.pay]
 
 /* one box: its shaded side facets, the top face, the ink lines */
 const Solid = (props) => [
@@ -406,8 +407,8 @@ defineExpose({ el })
 .hm-bolt-sink { fill: #E3E7EE; stroke: var(--m-faint); stroke-width: 0.02; }
 .hm-bolt { fill: #FFFFFF; stroke: var(--m-line); stroke-width: 0.02; }
 .hm-bolt-slot { stroke: color-mix(in srgb, var(--vk-ink) 45%, transparent); stroke-width: 0.03; stroke-linecap: round; }
-.hm-piece { fill: none; stroke: color-mix(in srgb, var(--vk-ink) 16%, transparent); stroke-width: 4.5; stroke-linecap: round; transition: stroke .3s cubic-bezier(.16, 1, .3, 1); }
-.hm-piece.is-lit { stroke: var(--m-signal); }
+.hm-piece { fill: color-mix(in srgb, var(--vk-ink) 16%, transparent); transition: fill .3s cubic-bezier(.16, 1, .3, 1); }
+.hm-piece.is-lit { fill: var(--m-signal); }
 .hm-bar-track { fill: var(--m-faint); }
 .hm-bar { fill: var(--m-signal); }
 /* the dial sits on a small dark screen */
