@@ -405,6 +405,7 @@ function buildServer(app, auth, user) {
         return {
           status: m.status, outcome: v.outcome, summary: v.summary,
           engine: e ? { decided: e.decided, model_tokens: (e.tokens?.input || 0) + (e.tokens?.output || 0), took_ms: e.ms?.total, receipt: e.receipt } : undefined,
+          ...(v.report?.replay?.url ? { replay_video: v.report.replay.url } : {}),
           money: { held: money(m.amount_cents - (m.released_cents || 0)), released: money(m.released_cents || 0), paypal_captures: (m.tranches || []).length },
           checks: [...m.criteria].sort((a, b) => a.position - b.position).map((c) => {
             const r = v.criterion_results.find((x) => x.criterion_id === c.id)

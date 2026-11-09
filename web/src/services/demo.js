@@ -277,10 +277,26 @@ function verdictFor(m, sub, previous = null) {
     if (e.status !== 'judge') return { criterionId: cr.id, passed: e.status === 'pass', confidence: 0.99, explanation: e.explanation, evidence: j.evidence, layer: e.layer, probes: strip(e.probes) }
     const old = previous?.results.find((r) => r.criterionId === cr.id && ['model', 'reused'].includes(r.layer) && ['content', 'code'].includes(cr.kind))
     if (old) return { ...old, layer: 'reused', probes: strip(e.probes) }
-    return { criterionId: cr.id, ...j, layer: 'model', probes: strip(e.probes) }
+    return { criterionId: cr.id, ...j, evidence: [...(j.evidence || []), ...demoPrecedent(cr, j.passed)], layer: 'model', probes: strip(e.probes) }
   })
   return results
 }
+
+// Precedent in the demo: similar checks from the sample history, as Elastic would return them live
+const PRECEDENT = {
+  visual: [['Nothing wider than the screen at 375px', 'the layout scan found no element wider than the viewport'], ['Above the fold shows the headline, call to action and logo', 'all three visible in the desktop screenshot'], ['The hero image fits on a phone without cropping the headline', 'the headline was cut off at 375px']],
+  functional: [['The form accepts a valid email and shows a confirmation', 'a thank-you message appeared after submitting'], ['The contact form sends and confirms', 'the form posted and the page showed “…”'], ['The signup form shows a confirmation after a valid email', 'the request failed with a 404 and nothing confirmed']],
+  content: [['The menu page lists the prices from the brief', 'every listed price matched the brief'], ['The about section uses the copy from the brief', 'the copy matched, with one heading reworded'], ['Prices match the agreed price list', 'two prices differed from the list']],
+  code: [['Repository has a README with setup steps', 'README explains install and run'], ['No secrets or .env files committed', 'no env files in the tree']],
+  performance: [['Main content paints in under 2.5 s on mobile', 'measured 1.9 s at 375px']],
+}
+function demoPrecedent(cr, passed) {
+  const pool = PRECEDENT[cr.kind] || PRECEDENT.functional
+  const items = pool.slice(0, 3).map(([statement, reason], i) => ({ statement, reason, met: i < 2 ? passed : !passed }))
+  return [{ type: 'precedent', label: `Precedent · ${items.length} similar checks`, met: items.filter((x) => x.met).length, notMet: items.filter((x) => !x.met).length, items }]
+}
+// the verifier's session as video: live verifications record their own on Kernel; the demo shows a real example
+const SAMPLE_REPLAY = { url: '/replays/kernel-sample.mp4', seconds: 27, by: 'kernel', sample: true }
 
 const running = new Set()
 async function runVerification(milestoneId) {
@@ -341,6 +357,7 @@ async function runVerification(milestoneId) {
       createdAt: now(),
       summary: demoSummary(results, m.criteria, tampered),
       results,
+      replay: SAMPLE_REPLAY,
       engine: {
         version: 'probes-1', decided, tokens: tokensFor(left.length),
         probes: { run: results.reduce((s, r) => s + r.probes.length, 0), passed: results.reduce((s, r) => s + r.probes.filter((p) => p.status === 'pass').length, 0), failed: results.reduce((s, r) => s + r.probes.filter((p) => p.status === 'fail').length, 0) },
@@ -1851,7 +1868,7 @@ export const demo = {
       tokens: tokensFor(rs.filter((r) => r.layer === 'model').length), ms: { total: ms }, receipt: fakeHash(),
       probes: { run: rs.reduce((s, r) => s + r.probes.length, 0), passed: rs.reduce((s, r) => s + r.probes.filter((p) => p.status === 'pass').length, 0), failed: rs.reduce((s, r) => s + r.probes.filter((p) => p.status === 'fail').length, 0) },
     })
-    s1.verdict = { id: uid('v'), outcome: 'pass', confidence: 0.97, createdAt: t(5.1), summary: demoSummary(r1, m1.criteria, false), results: r1, engine: engineOf(r1, 19400) }
+    s1.verdict = { id: uid('v'), outcome: 'pass', confidence: 0.97, createdAt: t(5.1), summary: demoSummary(r1, m1.criteria, false), results: r1, replay: SAMPLE_REPLAY, engine: engineOf(r1, 19400) }
     m1.submissions = [s1]
     m2.fundedAt = t(4); m2.authorizedAt = t(4); m2.holdExpiresAt = new Date(Date.now() + 25 * 864e5).toISOString()
     m2.reauthorizedAt = t(1)   // the honor period ended, so Verdikt renewed the hold, as the server's renewHolds does
@@ -1861,7 +1878,7 @@ export const demo = {
     m2.submissions = [s2]
     const results = verdictFor(m2, s2)
     const failed = results.filter((r) => !r.passed).length
-    s2.verdict = { id: uid('v'), outcome: 'fail', confidence: 0.96, createdAt: t(0.28), summary: demoSummary(results, m2.criteria, false), results, engine: engineOf(results, 16800) }
+    s2.verdict = { id: uid('v'), outcome: 'fail', confidence: 0.96, createdAt: t(0.28), summary: demoSummary(results, m2.criteria, false), results, replay: SAMPLE_REPLAY, engine: engineOf(results, 16800) }
     // Sam's coding agent pre-checked over MCP before delivering, then asked why the layout check fails
     const pre = precheckFor(m2, s2)
     const firstFail = pre.checks.find((x) => x.status === 'fail')

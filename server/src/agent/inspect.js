@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { chromium } from 'playwright-core'
 import { globRe } from './probes.js'
+import { kernelOn, cloudBrowser, fillScreen } from '../lib/kernel.js'
 
 const AXE = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8')
 
@@ -171,16 +172,21 @@ async function tryForm(page) {
 
 /**
  * @param {object} [plan] from probes.planFor: { queries, paths, links, axe, form }
+ * @param {object} [opts] { record }: an official verification runs on Kernel and is recorded (lib/kernel.js)
  * @returns {Promise<object>} site evidence; never throws for a broken site — that is evidence too
  */
-export async function inspectSite(url, plan = {}) {
-  const release = await slot()
-  const browser = await chromium.launch(launchOptions()).catch((e) => { release(); throw e })
-  const out = { url, views: {}, form: null, subpages: {}, links: null, axe: null, error: null }
+export async function inspectSite(url, plan = {}, { record = false } = {}) {
+  // a recorded run happens in Kernel's cloud, so it doesn't wait for this server's browser slot
+  let cloud = null
+  if (record && kernelOn()) cloud = await cloudBrowser().catch(() => null)
+  const release = cloud ? () => {} : await slot()
+  const browser = cloud ? cloud.browser : await chromium.launch(launchOptions()).catch((e) => { release(); throw e })
+  const out = { url, views: {}, form: null, subpages: {}, links: null, axe: null, error: null, browser: cloud ? 'kernel' : 'local', replay: null }
   try {
     for (const v of VIEWS) {
       const context = await browser.newContext({ viewport: { width: v.width, height: v.height }, isMobile: v.isMobile, deviceScaleFactor: 1 })
       const page = await context.newPage()
+      if (cloud) await fillScreen(page)
       const consoleErrors = []
       const failedRequests = []
       page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 300)) })
@@ -224,6 +230,7 @@ export async function inspectSite(url, plan = {}) {
     for (const path of plan.paths || []) {
       const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
       const page = await context.newPage()
+      if (cloud) await fillScreen(page)
       try {
         const res = await page.goto(new URL(path, origin).href, { waitUntil: 'load', timeout: 20000 })
         await page.waitForTimeout(600)
@@ -237,7 +244,8 @@ export async function inspectSite(url, plan = {}) {
   } catch (e) {
     out.error = e.message.split('\n')[0]
   } finally {
-    await browser.close()
+    if (cloud) out.replay = await cloud.finish()
+    else await browser.close()
     release()
   }
   if (plan.links) out.links = await checkLinks(out.views.desktop?.links || [])

@@ -18,6 +18,7 @@ import { db, audit } from '../lib/supabase.js'
 import { release } from '../lib/flow.js'
 import { runProbes, receiptOf, fingerprintOf } from './engine.js'
 import { explain, ENGINE } from './probes.js'
+import { precedentFor, precedentLines, precedentEvidence, indexVerdict } from '../lib/precedent.js'
 
 const SYSTEM = `You are the verifier in an escrow service. Money is released to a freelancer only if every acceptance
 criterion below is met, so your judgment has real consequences for both parties.
@@ -87,8 +88,8 @@ const PROBE_EVIDENCE = {
 
 const running = new Set()
 
-async function upload(path, png) {
-  const { error } = await db().storage.from('evidence').upload(path, png, { contentType: 'image/png', upsert: true })
+async function upload(path, body, contentType = 'image/png') {
+  const { error } = await db().storage.from('evidence').upload(path, body, { contentType, upsert: true })
   if (error) return null
   return db().storage.from('evidence').getPublicUrl(path).data.publicUrl
 }
@@ -154,6 +155,7 @@ async function verify(milestoneId, submissionId) {
   const { specs, facts, evals, flags, ms } = await runProbes({
     contract: m.contract, criteria, liveUrl: sub.live_url, repoUrl: sub.repo_url,
     onStage: async (s) => { stage = s; await push() },
+    record: true,
   })
   const { site, repo } = facts
   for (const c of criteria) {
@@ -169,6 +171,8 @@ async function verify(milestoneId, submissionId) {
     if (png) shots[name] = { png, url: await upload(`${base}/${name}.png`, png) }
   }
   if (site.form?.screenshot) shots.form = { png: site.form.screenshot, url: await upload(`${base}/form.png`, site.form.screenshot) }
+  // the browser session as video, when it ran on Kernel: what the verifier saw, in order
+  const replayUrl = site.replay?.video ? await upload(`${base}/replay.mp4`, site.replay.video, 'video/mp4') : null
 
   // ---- 2. reuse: same evidence as an earlier attempt → the same answer
   const open = criteria.filter((c) => evals.get(c.id).status === 'judge' || evals.get(c.id).status === 'needs_ocr')
@@ -189,6 +193,7 @@ async function verify(milestoneId, submissionId) {
   let verdict = { results: [], summary: '', tamper: { detected: false, quotes: [] } }
   let usage = { input: 0, output: 0 }
   let modelMs = 0
+  let precedent = new Map()
   if (toJudge.length || unconfirmed) {
     stage = 'model'
     await push()
@@ -196,6 +201,8 @@ async function verify(milestoneId, submissionId) {
     const needShots = kinds.has('visual') || kinds.has('functional')
     const needText = kinds.has('content') || kinds.has('visual') || kinds.has('functional') || flags.visible.length > 0
     const needRepo = kinds.has('code') || flags.repo.length > 0
+    // how the most similar checks elsewhere were decided (Elastic): alike evidence, alike answers
+    precedent = await precedentFor(toJudge, { milestoneId })
     const content = []
     if (needShots) {
       for (const [name, s] of Object.entries(shots)) {
@@ -227,7 +234,10 @@ async function verify(milestoneId, submissionId) {
           : 'Scanner flags: none.',
         '',
         toJudge.length ? 'Criteria to judge (with the probe facts for each):' : 'Every criterion was decided by probes; only check the flagged lines for tampering (results: []).',
-        ...toJudge.map((c) => `- id ${c.id} [${c.kind}] ${c.statement}${evals.get(c.id).probes.length ? `\n${factsFor(c)}` : ''}`),
+        ...toJudge.map((c) => `- id ${c.id} [${c.kind}] ${c.statement}${evals.get(c.id).probes.length ? `\n${factsFor(c)}` : ''}${precedent.has(c.id) ? `\n${precedentLines(precedent.get(c.id))}` : ''}`),
+        precedent.size
+          ? '\nPRECEDENT lines are how the most similar checks on other deliveries were decided (names and quotes redacted). Stay consistent with them when the evidence is alike; when you decide differently, say why in the explanation. The evidence here always decides.'
+          : '',
         '',
         'Call record_verdict with one result per listed criterion id.',
       ].filter((l) => l !== '').join('\n'),
@@ -321,7 +331,8 @@ async function verify(milestoneId, submissionId) {
     summary,
     model: usage.input ? MODEL : 'deterministic',
     report: {
-      site: { url: site.url, error: site.error },
+      site: { url: site.url, error: site.error, browser: site.browser },
+      replay: replayUrl ? { url: replayUrl, seconds: site.replay.seconds, by: 'kernel' } : null,
       repo: repo.error ? { error: repo.error } : { repo: repo.repo, branch: repo.branch, tree: repo.treeSha },
       tamper: tampered ? { detected: true, quotes: tamperQuotes, sources: tamperSources.length ? tamperSources : ['the delivery'] } : null,
       engine,
@@ -334,11 +345,13 @@ async function verify(milestoneId, submissionId) {
     passed: x.passed,
     confidence: Number(Math.min(1, Math.max(0, x.confidence)).toFixed(3)),
     explanation: x.explanation,
-    evidence: evidenceFor(x.evidence),
+    evidence: [...evidenceFor(x.evidence), ...(x.layer === 'model' ? precedentEvidence(precedent.get(x.criterion_id)) : [])],
     layer: x.layer,
     probes: x.probes.map(({ wantsOcr, fix, ...p }) => p),
     fingerprint: x.fingerprint,
   })))
+  // this verdict becomes precedent for the next ones (in the background: it never holds up the money)
+  void indexVerdict({ verdictId: v.id, milestoneId, at: v.created_at, criteria, results })
 
   await db().from('milestones').update({ status: outcome === 'pass' ? 'passed' : 'failed', progress: null }).eq('id', milestoneId)
   if (tampered) {

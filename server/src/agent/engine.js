@@ -21,15 +21,16 @@ const FORM_WORDS = /form|sign ?up|subscribe|newsletter|contact|waitlist/i
  * @param {object} p.contract   { id, title, brief }
  * @param {Array}  p.criteria   rows from public.criteria (check_spec may be empty: it compiles once here)
  * @param {Function} [p.onStage] (stage, detail) while it runs: browser | probes | ocr
+ * @param {boolean}  [p.record]  an official verification: the browser runs on Kernel and is recorded
  */
-export async function runProbes({ contract, criteria, liveUrl, repoUrl, onStage = () => {} }) {
+export async function runProbes({ contract, criteria, liveUrl, repoUrl, onStage = () => {}, record = false }) {
   const t0 = Date.now()
   const specs = await ensureSpecs(contract, criteria)
   const plan = planFor([...specs.values()])
   plan.form ||= criteria.some((c) => FORM_WORDS.test(c.statement))
 
   await onStage('browser')
-  const [site, repo] = await Promise.all([inspectSite(liveUrl, plan), inspectRepo(repoUrl, { files: plan.repoFiles })])
+  const [site, repo] = await Promise.all([inspectSite(liveUrl, plan, { record }), inspectRepo(repoUrl, { files: plan.repoFiles })])
   const facts = { site, repo }
   const ms = { collect: Date.now() - t0, ocr: 0 }
 

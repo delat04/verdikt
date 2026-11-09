@@ -6,7 +6,7 @@
 -->
 <script setup>
 import { ref, computed } from 'vue'
-import { Check, X, Minus, Globe, Github, Circle, ShieldAlert } from 'lucide-vue-next'
+import { Check, X, Minus, Globe, Github, Circle, ShieldAlert, Play } from 'lucide-vue-next'
 import VPill from './ui/VPill.vue'
 import VModal from './ui/VModal.vue'
 import VCopy from './ui/VCopy.vue'
@@ -51,6 +51,19 @@ const strip = computed(() => {
 const deterministic = computed(() => (engine.value ? (engine.value.decided.probe || 0) + (engine.value.decided.ocr || 0) : 0))
 
 const zoom = ref(null)
+
+// the browser session on Kernel, as video
+const replay = computed(() => verdict.value?.replay || null)
+const watching = ref(false)
+
+// precedent (Elastic): how the most similar checks elsewhere were decided, against this one's outcome
+const precedentOf = (r) => r.evidence?.find((e) => e.type === 'precedent') || null
+function agreement(r) {
+  const p = precedentOf(r)
+  if (!p) return null
+  const same = p.items.filter((x) => x.met === r.passed).length
+  return { same, total: p.items.length, consistent: same * 2 >= p.items.length }
+}
 </script>
 
 <template>
@@ -101,6 +114,15 @@ const zoom = ref(null)
       </p>
     </div>
 
+    <!-- the verifier's browser session, recorded on Kernel -->
+    <button v-if="replay" type="button" class="replay" @click="watching = true">
+      <span class="replay__play" aria-hidden="true"><Play :size="14" :stroke-width="2" /></span>
+      <span class="replay__text">
+        <span class="replay__title">Watch what the verifier saw</span>
+        <span class="vk-faint">{{ replay.sample ? 'Example recording · ' : '' }}<span class="vk-num">{{ replay.seconds }} s</span> · desktop, phone and the pages the checks named · recorded on Kernel</span>
+      </span>
+    </button>
+
     <!-- integrity: the delivery tried to talk to the verifier -->
     <section v-if="verdict?.integrity" class="vk-card vk-card--pill vk-card--tone-danger integrity" role="alert">
       <div class="integrity__body">
@@ -124,6 +146,9 @@ const zoom = ref(null)
             <p class="report__statement">{{ r.criterion.statement }}</p>
             <span v-if="r.layer" class="by" :class="`by--${r.layer}`" :title="LAYER[r.layer]?.long">{{ LAYER[r.layer]?.short || r.layer }}</span>
           </div>
+          <p v-if="verdict && agreement(r)" class="report__prec" :class="{ 'is-odd': !agreement(r).consistent }">
+            {{ agreement(r).consistent ? 'Consistent with' : 'Differs from' }} <span class="vk-num">{{ agreement(r).consistent ? agreement(r).same : agreement(r).total - agreement(r).same }} of {{ agreement(r).total }}</span> similar checks on other deliveries<template v-if="!agreement(r).consistent">: the explanation says why</template>
+          </p>
           <p v-if="verdict && !r.passed" class="report__why">{{ r.explanation }}</p>
           <p v-else-if="r.state === 'running'" class="report__doing vk-faint">{{ r.criterion.method || 'Checking…' }}</p>
 
@@ -143,6 +168,15 @@ const zoom = ref(null)
                 <img :src="e.url" :alt="e.label" loading="lazy" />
                 <span class="shot__label">{{ e.label }}</span>
               </button>
+              <figure v-else-if="e.type === 'precedent'" class="prec">
+                <figcaption class="vk-eyebrow">{{ e.label }}</figcaption>
+                <ul class="prec__list">
+                  <li v-for="(p, j) in e.items" :key="j" :class="p.met ? 'is-pass' : 'is-fail'">
+                    <span class="probes__mark" aria-hidden="true"><Check v-if="p.met" :size="11" :stroke-width="2.6" /><X v-else :size="11" :stroke-width="2.6" /></span>
+                    <span>{{ p.statement }}<span v-if="p.reason" class="vk-faint"> — {{ p.reason }}</span></span>
+                  </li>
+                </ul>
+              </figure>
               <figure v-else class="log">
                 <figcaption class="vk-eyebrow">{{ e.label }}</figcaption>
                 <pre class="vk-num">{{ e.text }}</pre>
@@ -164,6 +198,15 @@ const zoom = ref(null)
                   <img :src="e.url" :alt="e.label" loading="lazy" />
                   <span class="shot__label">{{ e.label }}</span>
                 </button>
+                <figure v-else-if="e.type === 'precedent'" class="prec">
+                  <figcaption class="vk-eyebrow">{{ e.label }}</figcaption>
+                  <ul class="prec__list">
+                    <li v-for="(p, j) in e.items" :key="j" :class="p.met ? 'is-pass' : 'is-fail'">
+                      <span class="probes__mark" aria-hidden="true"><Check v-if="p.met" :size="11" :stroke-width="2.6" /><X v-else :size="11" :stroke-width="2.6" /></span>
+                      <span>{{ p.statement }}<span v-if="p.reason" class="vk-faint"> — {{ p.reason }}</span></span>
+                    </li>
+                  </ul>
+                </figure>
                 <figure v-else class="log">
                   <figcaption class="vk-eyebrow">{{ e.label }}</figcaption>
                   <pre class="vk-num">{{ e.text }}</pre>
@@ -177,6 +220,14 @@ const zoom = ref(null)
 
     <VModal :open="!!zoom" :title="zoom?.label || ''" wide @close="zoom = null">
       <img v-if="zoom" :src="zoom.url" :alt="zoom.label" class="zoom" />
+    </VModal>
+
+    <VModal :open="watching" title="What the verifier saw" wide @close="watching = false">
+      <video v-if="watching && replay" :src="replay.url" class="replay__video" controls autoplay muted playsinline />
+      <p class="replay__note vk-faint">
+        <template v-if="replay?.sample">An example: a real recording of the verifier checking Verdikt's own site. Live verifications record their own.</template>
+        <template v-else>The whole check as it ran in Kernel's cloud browser: the page at 1440px and at 375px, then any pages the checks named. The screenshots and measurements in this report come from this session.</template>
+      </p>
     </VModal>
   </div>
 </template>
@@ -205,6 +256,25 @@ const zoom = ref(null)
 .engine__meta { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin: 0; font: var(--vk-type-small); }
 .engine__receipt { display: inline-flex; align-items: center; gap: 6px; }
 
+.replay {
+  display: flex; align-items: center; gap: 12px; width: 100%; margin-top: 14px; padding: 10px 14px 10px 10px; text-align: left;
+  border: 1px solid var(--vk-line); border-radius: var(--vk-r-md, 12px); background: var(--vk-surface); cursor: pointer;
+  transition: border-color var(--vk-dur-1);
+}
+.replay:hover { border-color: var(--vk-line-strong); }
+.replay:focus-visible { outline: 2px solid var(--vk-focus); outline-offset: 2px; }
+.replay__play { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--vk-accent); color: var(--vk-on-accent); }
+.replay__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; font: var(--vk-type-small); }
+.replay__title { font: var(--vk-type-dense); color: var(--vk-ink); }
+.replay__video { display: block; width: 100%; max-height: 70vh; border-radius: var(--vk-r-sm); background: #000; }
+.replay__note { margin: 10px 0 0; font: var(--vk-type-small); }
+.report__prec { margin: 4px 0 0; font: var(--vk-type-small); color: var(--vk-muted); }
+.report__prec.is-odd { color: var(--vk-warn-ink, var(--vk-ink-2)); }
+.prec { flex-basis: 100%; margin: 0; padding: 10px 12px; border: 1px solid var(--vk-line); border-radius: var(--vk-r-sm); background: var(--vk-surface); }
+.prec__list { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font: var(--vk-type-small); color: var(--vk-ink-2); }
+.prec__list li { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 8px; }
+.prec__list .is-pass .probes__mark { color: var(--vk-ok-ink); border-color: color-mix(in srgb, var(--vk-ok) 35%, transparent); }
+.prec__list .is-fail .probes__mark { color: var(--vk-danger-ink); border-color: color-mix(in srgb, var(--vk-danger) 35%, transparent); }
 .integrity { margin-top: 16px; }
 .integrity__body { padding: 14px 16px 14px 18px; }
 .integrity__title { display: flex; align-items: center; gap: 8px; margin: 0; font: 400 15px/20px var(--vk-font); color: var(--vk-danger-ink); }

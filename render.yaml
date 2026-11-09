@@ -30,6 +30,15 @@ services:
       # optional: Claude for the demo's dashboard assistant, up to this many turns a day (empty: offline)
       - key: STUDIO_DEMO_TURNS_PER_DAY
         sync: false
+      # optional: Kernel records each official verification as video; Elastic keeps verdict precedent
+      - key: KERNEL_API_KEY
+        sync: false
+      - key: ELASTIC_URL
+        sync: false
+      - key: ELASTIC_API_KEY
+        sync: false
+      - key: CHANNEL3_API_KEY
+        sync: false
       - key: PLATFORM_FEE_PERCENT
         value: "2"
       # read at build time — public, they ship to the browser

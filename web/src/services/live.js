@@ -78,6 +78,7 @@ function mapContract(c) {
           id: v.id, outcome: v.outcome, confidence: Number(v.confidence), summary: v.summary, createdAt: v.created_at,
           integrity: v.report?.tamper || null,
           engine: v.report?.engine || null,
+          replay: v.report?.replay || null,
           results: (v.criterion_results || []).map((r) => ({
             criterionId: r.criterion_id, passed: r.passed, confidence: Number(r.confidence), explanation: r.explanation, evidence: r.evidence || [],
             layer: r.layer || 'model', probes: r.probes || [],
