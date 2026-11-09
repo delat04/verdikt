@@ -27,6 +27,9 @@ services:
       # or Claude through OpenRouter: when set, used instead of ANTHROPIC_API_KEY
       - key: OPENROUTER_API_KEY
         sync: false
+      # optional: Claude for the demo's dashboard assistant, up to this many turns a day (empty: offline)
+      - key: STUDIO_DEMO_TURNS_PER_DAY
+        sync: false
       - key: PLATFORM_FEE_PERCENT
         value: "2"
       # read at build time — public, they ship to the browser

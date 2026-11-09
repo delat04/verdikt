@@ -57,6 +57,12 @@ const LABEL = {
   'escrow.renew_failed': () => 'PayPal would not renew the hold yet',
   'terms.expense_budget': (p) => (p.budgetCents ? `Expense budget on M${p.milestone}: up to ${money(p.budgetCents)} for ${(p.covers || []).join(', ')} — signatures reset` : `Expense budget removed from M${p.milestone} — signatures reset`),
   'expense.claimed': (p) => `${p.viaAgent ? 'Agent claimed' : 'Claimed'} ${money(p.amountCents)} for ${p.merchant || 'an expense'}`,
+  'terms.due_proposed': (p) => `${p.viaAgent ? 'Agent proposed' : 'Proposed'} moving M${p.milestone}'s due date from ${p.from || 'no date'} to ${p.to}${p.reason ? ` — “${p.reason}”` : ''}`,
+  'terms.due_changed': (p) => `Accepted: M${p.milestone} is now due ${p.to} (was ${p.from || 'no date'})`,
+  'terms.due_declined': (p) => `Declined moving M${p.milestone} to ${p.to}`,
+  'terms.due_withdrawn': (p) => `Withdrew the proposal to move M${p.milestone} to ${p.to}`,
+  'expense.product_planned': (p) => `${p.viaAgent ? 'Agent planned' : 'Planned'} a purchase: ${p.title} at ${p.domain}, listed at ${money(p.priceCents)}`,
+  'expense.product_unplanned': (p) => `Took ${p.title} off the planned purchases`,
   'expense.checked': (p) => ({
     approved: `Receipt passed every check${p.by === 'claude' ? ' (coverage read by Claude)' : ' — decided by rules, no model'}`,
     rejected: `Receipt for ${money(p.amountCents)} failed ${p.failed} check${p.failed === 1 ? '' : 's'} — not reimbursed`,

@@ -8,7 +8,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { LayoutGrid, Plus, Settings, Sun, Moon, Monitor, LogOut, Shapes, RotateCcw, Search, ArrowLeft, FlaskConical, Menu, X, ReceiptText, Briefcase } from 'lucide-vue-next'
+import { LayoutGrid, Plus, Settings, Sun, Moon, Monitor, LogOut, Shapes, RotateCcw, Search, ArrowLeft, FlaskConical, Menu, X, ReceiptText, Briefcase, ChartGantt, ChartPie } from 'lucide-vue-next'
 import BrandMark from '@/components/BrandMark.vue'
 import VAvatar from '@/components/ui/VAvatar.vue'
 import VButton from '@/components/ui/VButton.vue'
@@ -34,6 +34,8 @@ const nav = [
   { label: 'Contracts', to: '/contracts', icon: LayoutGrid, match: (p) => p === '/contracts' || /^\/contracts\/(?!new)/.test(p) },
   { label: 'Jobs', to: '/jobs', icon: Briefcase, match: (p) => p.startsWith('/jobs') },
   { label: 'Ledger', to: '/ledger', icon: ReceiptText, match: (p) => p.startsWith('/ledger') },
+  { label: 'Timeline', to: '/timeline', icon: ChartGantt, match: (p) => p.startsWith('/timeline') },
+  { label: 'Dashboard', to: '/dashboard', icon: ChartPie, match: (p) => p.startsWith('/dashboard') },
   { label: 'New contract', to: '/contracts/new', icon: Plus, match: (p) => p === '/contracts/new' },
   { label: 'Settings', to: '/settings', icon: Settings, match: (p) => p.startsWith('/settings') },
 ]

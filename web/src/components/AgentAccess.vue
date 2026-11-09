@@ -57,7 +57,7 @@ const codeCommand = (token) => `claude mcp add --transport http verdikt ${mcpUrl
   <VCard title="AI agents" sub="Let an AI agent hire, negotiate and deliver through Verdikt for you, over MCP.">
     <div class="aa">
       <ul class="aa__facts">
-        <li><Bot :size="15" aria-hidden="true" /> 28 tools: price and post jobs, review applicants and hire, negotiate, accept and sign terms, fund, deliver, read verdicts.</li>
+        <li><Bot :size="15" aria-hidden="true" /> 31 tools: price and post jobs, review applicants and hire, negotiate, accept and sign terms, fund, plan purchases, deliver, read verdicts, check a portfolio, check the money against PayPal.</li>
         <li><ShieldCheck :size="15" aria-hidden="true" /> It acts with your rights and everything it says is labelled as your agent. Money needs you once: approve each PayPal hold, or set a spending limit and it holds jobs from that, within your rules.</li>
       </ul>
 

@@ -11,5 +11,8 @@ dist/
 # Trial font used only to render the thumbnail locally — not licensed for redistribution
 thumbnail/font/
 
+# Generated demo voice-over (demo/.env holds the ElevenLabs key and is covered by .env above)
+demo/out/
+
 # Local test runs (hold session tokens)
 server/scripts/.tmp-*

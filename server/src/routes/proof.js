@@ -1,6 +1,8 @@
 /*  ============================================================================
     Proof of work — a freelancer's public record built only from work an AI verifier checked and
     PayPal settled. Every number traces to a PayPal capture and a verdict, so it can't be padded.
+    Beside it, the portfolio: past projects the freelancer listed, each with what Verdikt's probes
+    measured when they opened it (the title and summary stay the freelancer's own words).
     Opt-in (Settings → Public proof page); clients stay anonymous and project titles stay private —
     only milestone titles, amounts, check results and masked PayPal capture ids are shown.
       GET  /api/proof/:handle     the page's data (public)
@@ -36,8 +38,17 @@ async function proofOf(handle) {
       attempts: m.submissions.length,
     }
   })
+  // past projects the freelancer listed, with what Verdikt measured when it opened them
+  const { data: items } = await db().from('portfolio_items').select('title, summary, live_url, repo_url, check_result, checked_at').eq('freelancer_id', p.id).order('position').order('created_at')
+  const portfolio = (items || []).map((i) => ({
+    title: i.title, summary: i.summary, liveUrl: i.live_url, repoUrl: i.repo_url || '', host: new URL(i.live_url).host, checkedAt: i.checked_at,
+    check: i.check_result && {
+      counts: i.check_result.counts, total: i.check_result.total,
+      checks: i.check_result.checks.map((c) => ({ statement: c.statement, status: c.status, explanation: c.explanation })),
+    },
+  }))
   return {
-    name: p.display_name, headline: p.headline, handle: p.handle, since: p.created_at,
+    name: p.display_name, headline: p.headline, handle: p.handle, since: p.created_at, portfolio,
     stats: {
       paidCents: paid.reduce((s, m) => s + m.released_cents, 0),
       milestones: paid.length,

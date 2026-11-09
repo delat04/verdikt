@@ -14,6 +14,8 @@ const routes = [
   { path: '/contracts/:id', component: () => import('@/views/ContractView.vue'), props: true },
   { path: '/jobs', component: () => import('@/views/JobsView.vue') },
   { path: '/ledger', component: () => import('@/views/LedgerView.vue') },
+  { path: '/timeline', component: () => import('@/views/TimelineView.vue') },
+  { path: '/dashboard', component: () => import('@/views/StudioView.vue') },
   { path: '/settings', component: () => import('@/views/SettingsView.vue') },
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ]

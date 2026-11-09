@@ -232,6 +232,18 @@ export async function checkExpense({ claim, receipt, milestone, contract, commit
   if (claimed <= left) add('budget', 'Fits the expense budget', 'pass', `${$(claimed)} of the ${$(left)} left (budget ${$(budget)}).`)
   else add('budget', 'Fits the expense budget', 'fail', `You claimed ${$(claimed)}; ${$(left)} of the ${$(budget)} budget is left.`, left >= 100 ? `Claim ${$(left)} or less, or agree a bigger budget with a change order.` : 'The budget is used up.')
 
+  // planned purchases (pinned from live listings): the same store, from 10% under to 20% over the listed price
+  // (tax and shipping), is the plan and reimburses on its own; anything else waits for the client
+  const planned = Array.isArray(milestone.expense_products) ? milestone.expense_products : []
+  if (planned.length) {
+    const said = `${receipt.text}\n${claim.merchant || ''}`.toLowerCase()
+    const store = (domain) => domain.toLowerCase().replace(/^www\./, '').split('.')[0]   // bestbuy.com → bestbuy
+    const match = planned.find((x) => (said.includes(x.domain.toLowerCase()) || said.includes(store(x.domain)))
+      && claimed >= Math.round(x.priceCents * 0.9) && claimed <= Math.round(x.priceCents * 1.2))
+    if (match) add('planned', 'A planned purchase', 'pass', `Planned: ${match.title} at ${match.domain}, listed at ${$(match.priceCents)} when it was planned.`)
+    else add('planned', 'A planned purchase', 'unknown', `Not one of the ${planned.length} planned purchase${planned.length === 1 ? '' : 's'}: no planned store at about this price.`, 'The client confirms purchases that weren’t planned.')
+  }
+
   // a receipt that talks to the AI is a tampered receipt
   const injected = scanForInjection({ views: { desktop: { text: receipt.text } } }, null).visible
   if (injected.length) add('integrity', 'No instructions to the checker', 'fail', `The receipt contains text addressed to the AI checking it: “${injected[0].quote.slice(0, 120)}”.`, 'Upload the original receipt.')

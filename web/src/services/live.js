@@ -5,6 +5,7 @@
     ============================================================================ */
 
 import { supabase } from '@/lib/supabase'
+import { claudeAdapter } from './claudeStudio'
 
 // deployed, the API serves this app from the same origin; in development it runs on :4100
 const BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:4100')
@@ -35,12 +36,12 @@ const profileOf = (p, email) => p && ({
 function mapContract(c) {
   const milestones = [...(c.milestones || [])].sort((a, b) => a.position - b.position).map((m) => ({
     id: m.id, position: m.position, title: m.title, description: m.description || '',
-    amountCents: m.amount_cents, dueAt: m.due_at, status: m.status,
+    amountCents: m.amount_cents, dueAt: m.due_at, dueProposal: m.due_proposal || null, status: m.status,
     fundedAt: m.funded_at, releasedAt: m.released_at, progress: m.progress || undefined,
     authorizedAt: m.authorized_at, holdExpiresAt: m.hold_expires_at, reauthorizedAt: m.reauthorized_at,
     releasedCents: m.released_cents, voidedCents: m.voided_cents, feeCents: m.fee_cents, payoutCents: m.payout_cents,
     payoutEmail: m.payout_email, payoutStatus: m.payout_status, paidOutAt: m.paid_out_at, tranches: m.tranches || [],
-    expenseBudgetCents: m.expense_budget_cents || 0, expenseCovers: m.expense_covers || [],
+    expenseBudgetCents: m.expense_budget_cents || 0, expenseCovers: m.expense_covers || [], expenseProducts: m.expense_products || [],
     spendLimitId: m.spend_limit_id || null,
     expenses: [...(m.expenses || [])].sort((a, b) => a.created_at.localeCompare(b.created_at)).map((e) => ({
       id: e.id, amountCents: e.amount_cents, merchant: e.merchant, purpose: e.purpose, receiptName: e.receipt_name, receiptType: e.receipt_type,
@@ -245,6 +246,12 @@ export const live = {
   // ---- expenses: a budget agreed with the terms, reimbursed against receipts
   setExpenseBudget: (milestoneId, { budgetCents, covers }) => call(`/milestones/${milestoneId}/expense-budget`, { method: 'PUT', body: { budgetCents, covers } }),
   claimExpense: (milestoneId, body) => call(`/milestones/${milestoneId}/expenses`, { body }),
+  proposeDue: (milestoneId, { dueAt, reason }) => call(`/milestones/${milestoneId}/due-proposal`, { body: { dueAt, reason } }),
+  acceptDue: (milestoneId) => call(`/milestones/${milestoneId}/due-proposal/accept`),
+  declineDue: (milestoneId) => call(`/milestones/${milestoneId}/due-proposal/decline`),
+  searchBudgetProducts: (milestoneId, query) => call(`/milestones/${milestoneId}/expenses/products`, { body: { query } }),
+  planProduct: (milestoneId, productId) => call(`/milestones/${milestoneId}/expenses/plan`, { body: { productId } }),
+  unplanProduct: (milestoneId, productId) => call(`/milestones/${milestoneId}/expenses/plan/${productId}`, { method: 'DELETE' }),
   approveExpense: (id) => call(`/expenses/${id}/approve`),
   declineExpense: (id, reason = '') => call(`/expenses/${id}/decline`, { body: { reason } }),
   expenseReceipt: (id) => call(`/expenses/${id}/receipt`, { method: 'GET' }),
@@ -254,12 +261,22 @@ export const live = {
   declineAppeal: (appealId) => call(`/appeals/${appealId}/decline`),
   syncDisputes: () => call('/disputes/sync'),
   askLedger: (question, columns) => call('/ledger/ask', { body: { question, columns } }),
+  reconcileLedger: () => call('/ledger/reconcile'),
+  studioContracts: () => live.listContracts(),
+  studioAdapter: () => claudeAdapter({
+    path: '/studio/turn',
+    token: async () => (await supabase.auth.getSession()).data.session?.access_token,
+  }),
   requestChange: (contractId, request) => call(`/contracts/${contractId}/changes`, { body: { request } }),
   acceptChange: (id) => call(`/changes/${id}/accept`),
   counterChange: (id, body) => call(`/changes/${id}/counter`, { body }),
   declineChange: (id) => call(`/changes/${id}/decline`),
   getProof: (handle) => call(`/proof/${encodeURIComponent(handle)}`, { method: 'GET' }),
   setProofSettings: (body) => call('/profile/proof', { method: 'PUT', body }),
+  listPortfolio: () => call('/portfolio', { method: 'GET' }),
+  addPortfolio: (body) => call('/portfolio', { body }),
+  deletePortfolio: (id) => call(`/portfolio/${id}`, { method: 'DELETE' }),
+  checkPortfolio: (id) => call(`/portfolio/${id}/check`),
   listAgentTokens: () => call('/agent-tokens', { method: 'GET' }),
   createAgentToken: (label) => call('/agent-tokens', { body: { label } }),
   revokeAgentToken: (id) => call(`/agent-tokens/${id}/revoke`),

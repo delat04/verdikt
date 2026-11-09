@@ -16,7 +16,7 @@ const OPENROUTER_BASE = (process.env.OPENROUTER_BASE_URL || 'https://openrouter.
 export const MODEL = process.env.VERDIKT_MODEL || (OPENROUTER_KEY ? 'anthropic/claude-opus-5.5' : 'claude-opus-5-5')
 
 let client = null
-const anthropic = () => (client ??= OPENROUTER_KEY
+export const anthropic = () => (client ??= OPENROUTER_KEY
   ? new Anthropic({ baseURL: OPENROUTER_BASE, apiKey: null, authToken: OPENROUTER_KEY })
   : new Anthropic())
 

@@ -5,7 +5,7 @@
 -->
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { ShieldCheck, ArrowRight, Check } from 'lucide-vue-next'
+import { ShieldCheck, ArrowRight, Check, X, ExternalLink } from 'lucide-vue-next'
 import BrandMark from '@/components/BrandMark.vue'
 import VButton from '@/components/ui/VButton.vue'
 import VAvatar from '@/components/ui/VAvatar.vue'
@@ -79,6 +79,41 @@ const pct = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`)
         </ol>
         <p v-if="!data.proofs.length" class="pf__sub">No paid milestones yet.</p>
 
+        <section v-if="data.portfolio?.length" class="pf__folio" aria-labelledby="pf-folio">
+          <div>
+            <h2 id="pf-folio" class="pf__folio-title">Portfolio, checked live</h2>
+            <p class="pf__sub">Projects {{ data.name.split(' ')[0] }} listed. Verdikt opened each one at desktop and phone sizes and ran the same probes it uses on deliveries. The descriptions are {{ data.name.split(' ')[0] }}'s; the results are measured.</p>
+          </div>
+          <ul class="pf__grid">
+            <li v-for="(p, i) in data.portfolio" :key="i" class="pf__card">
+              <div class="pf__card-top">
+                <div>
+                  <h3 class="pf__card-title">{{ p.title }}</h3>
+                  <a :href="p.liveUrl" target="_blank" rel="noopener nofollow" class="pf__host">{{ p.host }} <ExternalLink :size="12" aria-hidden="true" /></a>
+                </div>
+                <span v-if="p.check" class="pf__card-score vk-num" :class="{ 'is-clean': !p.check.counts.fail && !p.check.counts.unclear }">{{ p.check.counts.pass }}/{{ p.check.total }}</span>
+              </div>
+              <p v-if="p.summary" class="pf__card-sum">{{ p.summary }}</p>
+              <template v-if="p.check">
+                <div class="pf__meter" :aria-label="`${p.check.counts.pass} of ${p.check.total} checks pass`">
+                  <span v-for="(c, n) in p.check.checks" :key="n" :class="{ 'is-on': c.status === 'pass', 'is-fail': c.status === 'fail' }" />
+                </div>
+                <details class="pf__details">
+                  <summary>Checked {{ shortDate(p.checkedAt) }} · what was measured</summary>
+                  <ul class="pf__checks">
+                    <li v-for="(c, n) in p.check.checks" :key="n" :class="`is-${c.status}`">
+                      <Check v-if="c.status === 'pass'" :size="13" aria-hidden="true" /><X v-else :size="13" aria-hidden="true" />
+                      <span><span class="pf__check">{{ c.statement }}</span> <span class="pf__measured">{{ c.explanation }}</span></span>
+                    </li>
+                  </ul>
+                </details>
+              </template>
+              <p v-else class="pf__card-meta">Listed, not checked yet</p>
+              <a v-if="p.repoUrl" :href="p.repoUrl" target="_blank" rel="noopener nofollow" class="pf__cap">{{ p.repoUrl.replace('https://github.com/', 'github.com/') }}</a>
+            </li>
+          </ul>
+        </section>
+
         <section class="pf__cta">
           <div>
             <h2 class="pf__cta-title">Hire {{ data.name.split(' ')[0] }} through Verdikt</h2>
@@ -116,6 +151,23 @@ const pct = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`)
 .pf__card-meta { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin: 0; font: var(--vk-type-small); color: var(--vk-muted); }
 .pf__card-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .pf__cap { font-size: 11px; color: var(--vk-faint); }
+.pf__folio { display: flex; flex-direction: column; gap: 14px; padding-top: 8px; border-top: 1px solid var(--vk-line); }
+.pf__folio-title { margin: 14px 0 0; font: 400 20px/26px var(--vk-font); color: var(--vk-ink); }
+.pf__host { display: inline-flex; align-items: center; gap: 4px; margin-top: 2px; font: var(--vk-type-small); color: var(--vk-accent-text); text-decoration: none; overflow-wrap: anywhere; }
+.pf__host:hover { text-decoration: underline; }
+.pf__card-score { font: var(--vk-num-18); color: var(--vk-ink); white-space: nowrap; }
+.pf__card-score.is-clean { color: var(--vk-ok-ink); }
+.pf__card-sum { margin: 0; font: var(--vk-type-dense); color: var(--vk-ink-2); }
+.pf__meter span.is-fail { background: var(--vk-danger); border-color: var(--vk-danger); }
+.pf__details summary { cursor: pointer; font: var(--vk-type-small); color: var(--vk-muted); }
+.pf__details summary:hover { color: var(--vk-ink); }
+.pf__checks { margin: 10px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.pf__checks li { display: flex; gap: 8px; align-items: flex-start; font: var(--vk-type-small); }
+.pf__checks li svg { flex: none; margin-top: 3px; }
+.pf__checks li.is-pass svg { color: var(--vk-ok-ink); }
+.pf__checks li.is-fail svg { color: var(--vk-danger-ink); }
+.pf__check { color: var(--vk-ink); }
+.pf__measured { color: var(--vk-muted); }
 .pf__cta { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 24px; border: 1px solid var(--vk-accent-line); border-radius: var(--vk-r-lg); background: var(--vk-accent-soft); }
 .pf__cta-title { margin: 0; font: 400 20px/26px var(--vk-font); color: var(--vk-ink); }
 </style>

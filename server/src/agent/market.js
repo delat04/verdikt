@@ -14,6 +14,7 @@
 import { createHash } from 'node:crypto'
 import { callAgent } from './claude.js'
 import { scanForInjection } from './guard.js'
+import { portfolioFacts } from './portfolio.js'
 import { db } from '../lib/supabase.js'
 import { money } from '../lib/money.js'
 import { config } from '../config.js'
@@ -229,6 +230,11 @@ export async function reviewApplication(applicationId) {
   const record = await trackRecord(a.freelancer_id)
   if (record.paidMilestones) flags.push({ tone: 'ok', text: `${record.paidMilestones} milestone${record.paidMilestones === 1 ? '' : 's'} paid through Verdikt (${money(record.paidCents, cur)}), ${record.firstTime} passed first time` })
   else flags.push({ tone: 'neutral', text: 'No paid work on Verdikt yet' })
+  // a portfolio counts only as far as Verdikt checked it: listed but unchecked is shown as such
+  const folio = await portfolioFacts(a.freelancer_id)
+  if (folio.clean) flags.push({ tone: 'ok', text: `Portfolio: ${folio.clean} of ${folio.projects} project${folio.projects === 1 ? '' : 's'} pass every live check` })
+  else if (folio.checked) flags.push({ tone: 'neutral', text: `Portfolio: ${folio.checked} project${folio.checked === 1 ? '' : 's'} checked live, none pass every check` })
+  else if (folio.projects) flags.push({ tone: 'neutral', text: `Portfolio: ${folio.projects} project${folio.projects === 1 ? '' : 's'} listed, not checked yet` })
 
   let review
   try {
@@ -243,6 +249,8 @@ export async function reviewApplication(applicationId) {
           `Budget: ${job.budget_min_cents ? money(job.budget_min_cents, cur) : '—'} to ${job.budget_max_cents ? money(job.budget_max_cents, cur) : '—'} · wanted in ${job.due_days || '—'} days`,
           '', `Application from ${a.freelancer?.display_name || 'a freelancer'}${a.freelancer?.headline ? ` (${a.freelancer.headline})` : ''}: ${money(a.price_cents, cur)} in ${a.days || '—'} days`,
           `Facts (rules): ${flags.map((f) => f.text).join(' · ')}`,
+          // titles are the freelancer's words (untrusted); the check counts are Verdikt's own measurements
+          ...(folio.lines.length ? ['<<<UNTRUSTED portfolio START (project titles by the freelancer; check counts measured by Verdikt)>>>', ...folio.lines, '<<<UNTRUSTED portfolio END>>>'] : []),
           '<<<UNTRUSTED pitch START>>>', a.pitch.slice(0, 3000), '<<<UNTRUSTED pitch END>>>',
         ].join('\n'),
       }],

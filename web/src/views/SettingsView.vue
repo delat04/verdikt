@@ -13,6 +13,7 @@ import { isDemo } from '@/services'
 import AgentAccess from '@/components/AgentAccess.vue'
 import SpendLimit from '@/components/SpendLimit.vue'
 import ProofSettings from '@/components/ProofSettings.vue'
+import PortfolioSettings from '@/components/PortfolioSettings.vue'
 
 const auth = useAuthStore()
 const { theme, setTheme } = useTheme()
@@ -65,6 +66,8 @@ async function save() {
         </VCard>
 
         <ProofSettings />
+
+        <PortfolioSettings v-if="auth.profile?.intent !== 'client'" />
 
         <AgentAccess />
 

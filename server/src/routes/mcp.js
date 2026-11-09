@@ -28,7 +28,9 @@ can't decide goes to Claude. So the checks work like a test suite your coding ag
 Finding each other: a client's agent can price_check a brief (fair price + what it costs online, from live web prices),
 post_job, then review_applications (each ranked with Verdikt's record of the freelancer and red flags) and
 hire_applicant — that opens a contract room with both sides. A freelancer's agent can find_jobs and apply_to_job, or
-scout_opportunities for public posts elsewhere and offer to do them through Verdikt.
+scout_opportunities for public posts elsewhere and offer to do them through Verdikt; check_portfolio_project adds past
+work that Verdikt opens and checks live, which clients see beside the paid record. Either side can check_against_paypal:
+every hold, release and payout read back from PayPal and compared with Verdikt's numbers.
 
 Client agent: open_contract_room → share the invite → read_room / say_in_room (or delegate_negotiation) →
 accept_terms → sign_terms → fund_milestone → wait_for_verdict.
@@ -194,6 +196,32 @@ function buildServer(app, auth, user) {
     milestone_id: z.string(),
   }, async ({ milestone_id }) => api('GET', `/milestones/${milestone_id}/checks`), { readOnlyHint: true })
 
+  tool('check_portfolio_project', 'Freelancer: add a past project to your portfolio (or re-check one already there by project_id) and open it live with Verdikt\'s portfolio checks — loads on desktop and phone, fits 375px, paints under 2.5 s, axe-core accessibility, title/description/favicon, working links, and for a GitHub repo a README and no committed secrets. No model, no tokens. Results show on your public proof page and in application reviews. Up to 12 projects, 10 checks an hour.', {
+    project_id: z.string().optional(), title: z.string().optional(), live_url: z.string().url().optional(),
+    repo_url: z.string().url().optional(), summary: z.string().optional(),
+  }, async ({ project_id, title, live_url, repo_url, summary }) => {
+    const id = project_id || (await api('POST', '/portfolio', { title, liveUrl: live_url, repoUrl: repo_url || '', summary: summary || '' })).id
+    const p = await api('POST', `/portfolio/${id}/check`)
+    return {
+      project_id: p.id, title: p.title, site: p.liveUrl, passed: `${p.check.counts.pass} of ${p.check.total}`, took_ms: p.check.ms,
+      checks: p.check.checks.map((c) => ({ check: c.statement, status: c.status, measured: c.explanation, ...(c.fix && { fix: c.fix }) })),
+      next: p.check.counts.fail ? 'Fix what fails on the live site and check again — clients see the latest result.' : 'Every check passes. Clients see this on your proof page and next to your applications.',
+    }
+  })
+
+  tool('check_against_paypal', 'Read every hold, release and payout behind this person’s ledger back from PayPal itself and say, per milestone, whether Verdikt and PayPal agree — catches a refund made in PayPal, a chargeback, a returned or unclaimed payout. Read-only, nothing moves. Up to 60 recent milestones, 12 checks an hour.', {}, async () => {
+    const r = await api('POST', '/ledger/reconcile')
+    const count = (st) => r.milestones.filter((m) => m.state === st).length
+    return {
+      checked_at: r.checkedAt,
+      matches: count('matches'), differs: count('differs'), waiting_on_paypal: count('waiting'),
+      attention: r.milestones.filter((m) => m.state !== 'matches').map((m) => ({
+        milestone: m.title, state: m.state,
+        checks: m.checks.filter((c) => c.met !== true).map((c) => ({ what: c.what, paypal_id: c.id, verdikt: c.verdikt, paypal: c.paypal, note: c.note })),
+      })),
+    }
+  }, { readOnlyHint: true })
+
   tool('precheck_delivery', 'Freelancer only: dry-run every deterministic probe against a live URL (and repo) before delivering. No verdict, no money, no model tokens. Returns each check as pass, fail (with what was measured and how to fix it) or judge (left for the verifier). Both parties see that a pre-check ran. Up to 12 an hour per milestone.', {
     milestone_id: z.string(), live_url: z.string().url(), repo_url: z.string().url().optional(),
   }, async ({ milestone_id, live_url, repo_url }) => {
@@ -291,6 +319,21 @@ function buildServer(app, auth, user) {
   tool('scout_opportunities', 'Freelancer side: search the public web for recent posts from people looking to hire for work that fits these skills. Each result is a real page the search returned, with why it fits and a drafted first message that offers to do it through Verdikt’s escrow. It finds and drafts — your person decides whether to reach out.', {
     skills: z.string().describe('What you do: stack, kind of work, e.g. "Vue and Supabase web apps, landing pages"'),
   }, async ({ skills }) => api('POST', '/opportunities/scout', { skills }), { readOnlyHint: true })
+
+  tool('plan_budget_purchase', 'Either side, once a milestone has an expense budget: search live listings from thousands of stores (Channel3) for something the work needs to buy, in stock and within what is left of the budget. Pass plan_product_id (from a search result) to pin it as a planned purchase: a receipt from that store at about the listed price is then reimbursed without waiting for the client; anything off the plan waits for them. Links are Channel3 buy links.', {
+    milestone_id: z.string(), query: z.string().optional(), plan_product_id: z.string().optional(),
+  }, async ({ milestone_id, query, plan_product_id }) => {
+    if (plan_product_id) {
+      const r = await api('POST', `/milestones/${milestone_id}/expenses/plan`, { productId: plan_product_id })
+      return { planned: r.planned.map((p) => ({ product_id: p.id, title: p.title, listed: money(p.priceCents), store: p.domain, url: p.url })) }
+    }
+    const r = await api('POST', `/milestones/${milestone_id}/expenses/products`, { query: query || '' })
+    return {
+      left_in_budget: money(r.leftCents),
+      products: r.products.map((p) => ({ product_id: p.id, title: p.title, brand: p.brand || undefined, price: money(p.priceCents), store: p.domain, url: p.url })),
+      next: r.products.length ? 'Pass plan_product_id to pin the one to buy, then buy it from that store and claim_expense with the receipt.' : 'Nothing in stock within the budget — try other words.',
+    }
+  })
 
   tool('set_expense_budget', 'Before signing: give a milestone an expense budget — money the freelancer may spend on what the project needs (a domain, hosting, fonts, API credits), held in the same PayPal hold and reimbursed against receipts. Changing it resets both signatures. 0 removes it. Ask your person for the amount.', {
     milestone_id: z.string(),

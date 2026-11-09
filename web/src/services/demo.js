@@ -7,6 +7,9 @@
 import { split, money } from '@/domain/format'
 import { mediateDemo, agentMove, emptyTerms, blankState } from './demoMediator'
 import { askLocal } from '@/domain/ledgerAsk'
+import { SAMPLE_PRODUCTS, SAVED_ON } from './demoProducts'
+import { sampleHistory } from './demoHistory'
+import { claudeAdapter } from './claudeStudio'
 
 const KEY = 'verdikt-demo-v1'
 const listeners = new Set()
@@ -55,6 +58,8 @@ function blank() {
   for (const p of Object.values(PERSONAS)) {
     profiles[p.id] = { id: p.id, name: p.name, email: p.email, intent: p.intent, paypalEmail: p.intent === 'freelancer' ? p.email : '', onboarded: true }
   }
+  // Sam's proof page is public from the start, so a client can open his record and checked portfolio
+  Object.assign(profiles[PERSONAS.freelancer.id], { handle: 'sam-okafor', headline: 'Okafor Studio · Vue and Supabase', publicProof: true })
   return { sessionUserId: null, profiles, contracts: [] }
 }
 let db = load()
@@ -483,6 +488,7 @@ const RECEIPTS = {
   lunch: { via: 'ocr', merchant: 'Corner Deli', total: 1840, ref: '', lines: ['Turkey sandwich  $11.50', 'Flat white  $4.40', 'Brownie  $2.50', 'Total  $18.40'], covered: null },
   blurry: { via: 'ocr', merchant: '', total: null, ref: '', lines: ['F0nt sh0p ... l1cen5e', '... :: ...'], covered: null },
   hosting: { via: 'pdf', merchant: 'Stackhost', total: 2000, ref: 'SH-19876', lines: ['Starter plan — 1 project  $20.00', 'Total paid  $20.00'], covered: { word: 'hosting', cover: 'Hosting' } },
+  scanner: { via: 'pdf', merchant: 'Walmart', total: 3702, ref: 'WM-77310', lines: ['walmart.com order WM-77310', '2D Barcode Scanner  $34.20', 'Sales tax  $2.82', 'Order total  $37.02'], covered: { word: 'scanner', cover: 'Hardware' } },
 }
 const receiptFiles = new Map()   // expense id → an uploaded File, for this tab only
 const LIVE_CLAIM = ['checking', 'needs_client', 'approved']
@@ -510,6 +516,16 @@ function demoExpenseChecks(c, m, claim, key) {
   const left = Math.max(0, m.expenseBudgetCents - committed)
   if (claim.amountCents <= left) add('budget', 'Fits the expense budget', 'pass', `${$(claim.amountCents)} of the ${$(left)} left (budget ${$(m.expenseBudgetCents)}).`)
   else add('budget', 'Fits the expense budget', 'fail', `You claimed ${$(claim.amountCents)}; ${$(left)} of the ${$(m.expenseBudgetCents)} budget is left.`, 'Claim less, or agree a bigger budget with a change order.')
+  // planned purchases, as the live rules: the same store, 10% under to 20% over the listed price
+  const planned = m.expenseProducts || []
+  if (planned.length) {
+    const said = `${(r?.lines || []).join('\n')}\n${claim.merchant || r?.merchant || ''}`.toLowerCase()
+    const store = (domain) => domain.toLowerCase().replace(/^www\./, '').split('.')[0]
+    const match = planned.find((x) => (said.includes(x.domain.toLowerCase()) || said.includes(store(x.domain)))
+      && claim.amountCents >= Math.round(x.priceCents * 0.9) && claim.amountCents <= Math.round(x.priceCents * 1.2))
+    if (match) add('planned', 'A planned purchase', 'pass', `Planned: ${match.title} at ${match.domain}, listed at ${$(match.priceCents)} when it was planned.`)
+    else add('planned', 'A planned purchase', 'unknown', `Not one of the ${planned.length} planned purchase${planned.length === 1 ? '' : 's'}: no planned store at about this price.`, 'The client confirms purchases that weren’t planned.')
+  }
   let tokens = 0
   if (r?.covered) add('covered', 'Something the budget covers', 'pass', `The receipt mentions “${r.covered.word}” — covered as ${r.covered.cover}.`)
   else if (!readable) add('covered', 'Something the budget covers', 'unknown', 'The receipt could not be read, so coverage was not checked.')
@@ -566,6 +582,49 @@ function recordOf(freelancerId) {
   const paid = db.contracts.filter((c) => c.freelancer?.id === freelancerId).flatMap((c) => c.milestones).filter((m) => m.status === 'released' && m.releasedCents > 0)
   return { paidMilestones: paid.length, paidCents: paid.reduce((s, m) => s + m.releasedCents, 0), firstTime: paid.filter((m) => m.submissions.length <= 1).length }
 }
+// ---------------------------------------------------------------- portfolio (sample checks)
+// The demo can't open a real site, so a check returns sample measurements in the live probes' shape (marked demo).
+const FOLIO_CHECKS = [
+  { id: 'opens', statement: 'Opens on a desktop and a phone with no JavaScript errors', ok: 'Met — loads (HTTP 200) at 1440px and 375px; no JavaScript errors.' },
+  { id: 'phone', statement: 'Fits a 375px phone: nothing wider than the screen', ok: 'Met — at 375px the page is 375px wide.', bad: ['At 375px the page is 412px wide; widest offender: div.gallery (412px).', 'Make div.gallery fit a 375px screen.'] },
+  { id: 'speed', statement: 'Main content paints in under 2.5 s on a phone', ok: 'Met — the main content paints in 1.7 s at 375px.', bad: ['The main content paints in 3.4 s at 375px, over 2.5 s.', 'Serve the hero image at the size it shows (WebP) and preload it.'] },
+  { id: 'access', statement: 'No serious accessibility issues (axe-core, WCAG A/AA)', ok: 'Met — axe-core found no serious or critical violations.', bad: ['axe-core: 2 serious violations (color-contrast on 4 elements, a button with no name).', 'Darken the muted text to at least 4.5:1 and give the icon button a label.'] },
+  { id: 'basics', statement: 'Has a page title, a description and a favicon', ok: 'Met — title, meta description and favicon present.' },
+  { id: 'links', statement: 'Links to its own pages work', ok: 'Met — all 9 links to the site’s own pages answer below 400.' },
+  { id: 'readme', statement: 'The repository has a README', ok: 'Met — README.md found.', repo: true },
+  { id: 'secrets', statement: 'No secrets or .env files committed', ok: 'Met — no .env files or live keys in the files read.', repo: true },
+]
+function demoFolioCheck(item) {
+  // which check fails (if any) follows from the address, so a project always gets the same result
+  const h = [...item.liveUrl].reduce((s, ch) => s + ch.charCodeAt(0), 0)
+  const failing = item.failing ?? ['', 'speed', 'phone', 'access', ''][h % 5]
+  const checks = FOLIO_CHECKS.filter((c) => !c.repo || item.repoUrl).map((c) => {
+    const bad = c.id === failing && c.bad
+    // like the live probes' explain(): what was measured, then the fix
+    return { id: c.id, statement: c.statement, status: bad ? 'fail' : 'pass', explanation: bad ? `${c.bad[0]} ${c.bad[1]}` : c.ok, fix: bad ? c.bad[1] : null }
+  })
+  const fail = checks.filter((c) => c.status === 'fail').length
+  return { counts: { pass: checks.length - fail, fail, unclear: 0 }, total: checks.length, checks, ms: 6400 + (h % 3000), liveUrl: item.liveUrl, repoUrl: item.repoUrl || null, at: now(), demo: true }
+}
+function portfolioOf(userId) {
+  db.portfolio ||= {}
+  if (!db.portfolio[PERSONAS.freelancer.id]) {
+    // Sam arrives with two projects, already checked: one passes everything, one is slow on phones
+    const at = (d) => new Date(Date.now() - d * 864e5).toISOString()
+    db.portfolio[PERSONAS.freelancer.id] = [
+      { title: 'Northbrew landing page', summary: 'The café’s one-page site: menu, opening hours and a map, built in Vue.', liveUrl: 'https://northbrew-landing.vercel.app', repoUrl: 'https://github.com/okafor-studio/northbrew-landing', failing: '' },
+      { title: 'Tidepool yoga booking', summary: 'Class timetable with online booking and email reminders.', liveUrl: 'https://tidepool-booking.netlify.app', repoUrl: '', failing: 'speed' },
+    ].map((x, i) => {
+      const item = { id: uid('pf'), ...x, position: i }
+      item.check = { ...demoFolioCheck(item), at: at(3 + i * 4) }
+      return { ...item, checkedAt: item.check.at }
+    })
+  }
+  return (db.portfolio[userId] ||= [])
+}
+const folioItem = ({ failing, ...x }) => clone(x)
+const demoFound = new Map()   // milestone id → its last product search; a pin is read from here, like the live app
+
 function demoReview(job, a) {
   const $ = (c) => money(c, job.currency)
   const flags = []
@@ -579,6 +638,13 @@ function demoReview(job, a) {
   flags.push(record.paidMilestones
     ? { tone: 'ok', text: `${record.paidMilestones} milestone${record.paidMilestones === 1 ? '' : 's'} paid through Verdikt (${$(record.paidCents)}), ${record.firstTime} passed first time` }
     : { tone: 'neutral', text: 'No paid work on Verdikt yet' })
+  // a portfolio counts only as far as it was checked live
+  const folio = portfolioOf(a.freelancer.id)
+  const checked = folio.filter((x) => x.check)
+  const clean = checked.filter((x) => !x.check.counts.fail && !x.check.counts.unclear)
+  if (clean.length) flags.push({ tone: 'ok', text: `Portfolio: ${clean.length} of ${folio.length} project${folio.length === 1 ? '' : 's'} pass every live check` })
+  else if (checked.length) flags.push({ tone: 'neutral', text: `Portfolio: ${checked.length} project${checked.length === 1 ? '' : 's'} checked live, none pass every check` })
+  else if (folio.length) flags.push({ tone: 'neutral', text: `Portfolio: ${folio.length} project${folio.length === 1 ? '' : 's'} listed, not checked yet` })
   const words = new Set(job.brief.toLowerCase().match(/[a-z]{5,}/g) || [])
   const overlap = (a.pitch.toLowerCase().match(/[a-z]{5,}/g) || []).filter((w) => words.has(w)).length
   let fit = 55 + Math.min(20, overlap * 3) + (a.pitch.length > 180 ? 8 : 0) + flags.reduce((s, f) => s + ({ ok: 4, warn: -10, danger: -40 }[f.tone] || 0), 0)
@@ -611,7 +677,7 @@ function seedJobs() {
     brief: 'A page where coffee customers sign up for a loyalty card with their email and get a QR code; the tenth coffee is free. Staff scan the QR at the counter. Must work on phones.',
     budgetMinCents: 40000, budgetMaxCents: 70000, dueDays: 7, skills: ['Vue', 'QR codes', 'Forms'], createdAt: t(0.6), applications: [] }
   loyalty.applications.push(
-    app(loyalty, { id: sam.id, name: sam.name, email: sam.email, headline: 'Okafor Studio · Vue and Supabase' }, 60000, 6, 'Sign-up form that stores the customer and emails their QR code, a staff scan page that adds a stamp and shows the count, and a reward screen at ten. Built in Vue with Supabase, tested at 375px; I already know Northbrew\'s brand from the landing page.', t(0.5), true),
+    app(loyalty, { id: sam.id, name: sam.name, email: sam.email, headline: 'Okafor Studio · Vue and Supabase', handle: sam.publicProof ? sam.handle : null }, 60000, 6, 'Sign-up form that stores the customer and emails their QR code, a staff scan page that adds a stamp and shows the count, and a reward screen at ten. Built in Vue with Supabase, tested at 375px; I already know Northbrew\'s brand from the landing page.', t(0.5), true),
     app(loyalty, OUTSIDERS.ana, 52000, 7, 'A Vue page with the sign-up form, a QR code per customer and a simple staff view that counts stamps. Accessible forms, works offline at the counter.', t(0.45)),
     app(loyalty, OUTSIDERS.quick, 30000, 3, 'Fast and cheap with our template. To save the fees, pay us directly by bank transfer or crypto and message us on WhatsApp +1 555 010 4477, then we skip the platform.', t(0.3)),
   )
@@ -1368,6 +1434,86 @@ export const demo = {
     log(c, role, 'terms.expense_budget', { milestone: m.position, budgetCents, covers: m.expenseCovers }, m.id)
     save()
   },
+  // moving a due date after signing: one side proposes, the other accepts or declines
+  async proposeDue(milestoneId, { dueAt, reason = '' }) {
+    await latency()
+    const { c, m } = findMilestone(milestoneId)
+    const role = assertParty(c)
+    if (!(c.clientSignedAt && c.freelancerSignedAt)) throw new Error('Before signing, change the date in the contract room')
+    if (['released', 'refunded'].includes(m.status)) throw new Error('This milestone is already settled')
+    const due = new Date(dueAt)
+    if (Number.isNaN(due.getTime())) throw new Error('Pick a date')
+    if (due.getTime() < Date.now() + 3600e3) throw new Error('The new date has to be in the future')
+    if (m.dueAt && m.dueAt.slice(0, 10) === due.toISOString().slice(0, 10)) throw new Error('That’s already the due date')
+    m.dueProposal = { dueAt: due.toISOString(), from: m.dueAt || null, by: role, reason: String(reason).trim().slice(0, 240), viaAgent: false, at: now() }
+    log(c, role, 'terms.due_proposed', { milestone: m.position, from: (m.dueAt || '').slice(0, 10), to: m.dueProposal.dueAt.slice(0, 10), reason: m.dueProposal.reason }, m.id)
+    save()
+    return { proposal: clone(m.dueProposal) }
+  },
+  async acceptDue(milestoneId) {
+    await latency()
+    const { c, m } = findMilestone(milestoneId)
+    const role = assertParty(c)
+    const p = m.dueProposal
+    if (!p) throw new Error('No date change is waiting')
+    if (p.by === role) throw new Error('The other side accepts a date change')
+    m.dueAt = p.dueAt
+    m.dueProposal = null
+    log(c, role, 'terms.due_changed', { milestone: m.position, from: (p.from || '').slice(0, 10), to: p.dueAt.slice(0, 10) }, m.id)
+    save()
+    return { dueAt: m.dueAt }
+  },
+  async declineDue(milestoneId) {
+    await latency()
+    const { c, m } = findMilestone(milestoneId)
+    const role = assertParty(c)
+    const p = m.dueProposal
+    if (!p) throw new Error('No date change is waiting')
+    m.dueProposal = null
+    log(c, role, p.by === role ? 'terms.due_withdrawn' : 'terms.due_declined', { milestone: m.position, to: p.dueAt.slice(0, 10) }, m.id)
+    save()
+    return { ok: true }
+  },
+  // planned purchases from real Channel3 listings saved for the demo (the live app searches Channel3 each time)
+  async searchBudgetProducts(milestoneId, query) {
+    await wait(700 + Math.random() * 500)
+    const { c, m } = findMilestone(milestoneId)
+    assertParty(c)
+    if (!m.expenseBudgetCents) throw new Error('This milestone has no expense budget')
+    const q = String(query || '').toLowerCase()
+    if (q.trim().length < 3) throw new Error('Say what to look for, e.g. “2D barcode scanner”')
+    const kind = /scan|qr|barcode/.test(q) ? 'scanner' : /stand|mount|kiosk|tablet/.test(q) ? 'stand' : /print/.test(q) ? 'printer' : null
+    const pool = kind ? SAMPLE_PRODUCTS[kind] : Object.values(SAMPLE_PRODUCTS).flat().filter((p) => q.split(/\s+/).some((w) => w.length > 3 && p.title.toLowerCase().includes(w)))
+    const spent = (m.expenses || []).filter((e) => LIVE_CLAIM.includes(e.status)).reduce((s, e) => s + e.amountCents, 0)
+    const left = Math.max(0, m.expenseBudgetCents - spent)
+    const products = pool.filter((p) => p.priceCents <= left).map((p) => ({ ...p, currency: 'USD', inStock: true }))
+    demoFound.set(m.id, new Map(products.map((p) => [p.id, p])))
+    return { query, leftCents: left, products, savedOn: SAVED_ON }
+  },
+  async planProduct(milestoneId, productId) {
+    await latency()
+    const { c, m } = findMilestone(milestoneId)
+    const role = assertParty(c)
+    const p = demoFound.get(m.id)?.get(productId)
+    if (!p) throw new Error('Search again, then pin a product from the results')
+    const planned = (m.expenseProducts || []).filter((x) => x.id !== p.id)
+    if (planned.length >= 6) throw new Error('Up to 6 planned purchases per milestone')
+    m.expenseProducts = [...planned, { ...p, plannedBy: role, viaAgent: false, at: now() }]
+    log(c, role, 'expense.product_planned', { title: p.title, domain: p.domain, priceCents: p.priceCents }, m.id)
+    save()
+    return { planned: clone(m.expenseProducts) }
+  },
+  async unplanProduct(milestoneId, productId) {
+    await latency()
+    const { c, m } = findMilestone(milestoneId)
+    const role = assertParty(c)
+    const p = (m.expenseProducts || []).find((x) => x.id === productId)
+    if (!p) throw new Error('Not a planned purchase')
+    m.expenseProducts = m.expenseProducts.filter((x) => x.id !== productId)
+    log(c, role, 'expense.product_unplanned', { title: p.title, domain: p.domain }, m.id)
+    save()
+    return { planned: clone(m.expenseProducts) }
+  },
   async claimExpense(milestoneId, { amountCents, merchant, purpose, receipt }) {
     await latency()
     const { c, m } = findMilestone(milestoneId)
@@ -1463,6 +1609,41 @@ export const demo = {
     await wait(500 + Math.random() * 400)
     return askLocal(question)
   },
+  // the PayPal check: the demo's simulated PayPal agrees with itself, so every row matches or is still settling
+  async reconcileLedger() {
+    await wait(900 + Math.random() * 500)
+    const u = me()
+    const usd = (c) => `$${((c || 0) / 100).toFixed(2)}`
+    const milestones = []
+    for (const c of db.contracts.filter((x) => x.client?.id === u.id || x.freelancer?.id === u.id)) {
+      for (const m of c.milestones) {
+        if (!m.paypal?.authorizationId) continue
+        const checks = [{ what: 'Hold', id: m.paypal.authorizationId, verdikt: `${usd(m.amountCents)} · ${m.status}`, paypal: `${usd(m.amountCents)} · ${m.status === 'released' ? 'CAPTURED' : m.status === 'refunded' ? 'VOIDED' : 'CREATED'}`, met: true, note: '' }]
+        const tranches = m.tranches?.length ? m.tranches : m.paypal.captureId ? [{ captureId: m.paypal.captureId, cents: m.releasedCents ?? m.amountCents, netCents: m.payoutCents, payoutBatchId: m.paypal.payoutBatchId, payoutStatus: m.payoutStatus }] : []
+        tranches.forEach((t, i) => {
+          const label = tranches.length > 1 ? `Release ${i + 1}` : 'Release'
+          if (t.captureId) checks.push({ what: label, id: t.captureId, verdikt: `${usd(t.cents)} · released`, paypal: `${usd(t.cents)} · COMPLETED`, met: true, note: '' })
+          if (t.payoutBatchId) {
+            const done = (t.payoutStatus || m.payoutStatus) === 'SUCCESS'
+            checks.push({ what: `${label} payout`, id: t.payoutBatchId, verdikt: `${usd(t.netCents)} · ${(t.payoutStatus || 'pending').toLowerCase()}`, paypal: `${usd(t.netCents)} · ${done ? 'SUCCESS' : 'PENDING'}`, met: done ? true : null, note: done ? '' : 'PayPal is still sending it.' })
+          }
+        })
+        const state = checks.some((x) => x.met === null) ? 'waiting' : 'matches'
+        milestones.push({ milestoneId: m.id, title: `${c.title} · M${m.position} ${m.title}`, state, checks })
+      }
+    }
+    return { checkedAt: now(), milestones }
+  },
+  // ---- dashboard: your contracts plus a year of sample history; the assistant needs a real account
+  async studioContracts() {
+    const mine = await this.listContracts()
+    return [...mine, ...sampleHistory(me())]
+  },
+  // Claude through the API's demo budget when the server has one; otherwise one honest line
+  studioAdapter: () => claudeAdapter({
+    path: '/studio/demo-turn',
+    offline: 'This is the demo, and Claude isn’t switched on for it here. Sign in with a real account and I will build and change widgets from your own milestones, checks and PayPal movements.',
+  }),
   // ---- change orders: checked against the signed checks first (rule-based in the demo)
   async requestChange(contractId, request) {
     await latency()
@@ -1551,6 +1732,40 @@ export const demo = {
     Object.assign(u, { handle, headline, publicProof })
     save()
   },
+  async listPortfolio() {
+    await latency()
+    return { items: portfolioOf(me().id).map(folioItem) }
+  },
+  async addPortfolio({ title, summary = '', liveUrl, repoUrl = '' }) {
+    await latency()
+    if (String(title || '').trim().length < 2) throw new Error('Give the project a name')
+    if (!/^https:\/\/[^\s/.]+\.[^\s]+/i.test(liveUrl || '')) throw new Error('The live site must be a public https:// address')
+    if (repoUrl && !/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+/i.test(repoUrl)) throw new Error('The repository must be a public GitHub URL')
+    const list = portfolioOf(me().id)
+    if (list.length >= 12) throw new Error('A portfolio holds up to 12 projects — remove one first')
+    const item = { id: uid('pf'), title: title.trim().slice(0, 80), summary: summary.trim().slice(0, 400), liveUrl: liveUrl.trim(), repoUrl: repoUrl.trim(), position: list.length, check: null, checkedAt: null }
+    list.push(item)
+    save()
+    return folioItem(item)
+  },
+  async deletePortfolio(id) {
+    await latency()
+    const list = portfolioOf(me().id)
+    const i = list.findIndex((x) => x.id === id)
+    if (i < 0) throw new Error('Project not found')
+    list.splice(i, 1)
+    save()
+    return { ok: true }
+  },
+  async checkPortfolio(id) {
+    const item = portfolioOf(me().id).find((x) => x.id === id)
+    if (!item) throw new Error('Project not found')
+    await wait(2600 + Math.random() * 1200)   // the time a real check takes to open the site, roughly
+    item.check = demoFolioCheck(item)
+    item.checkedAt = item.check.at
+    save()
+    return folioItem(item)
+  },
   async getProof(handle) {
     await latency()
     const p = Object.values(db.profiles).find((x) => x.handle === handle && x.publicProof)
@@ -1561,6 +1776,10 @@ export const demo = {
     const firstTry = paid.filter((m) => m.submissions.find((s) => s.attempt === 1)?.verdict?.outcome === 'pass').length
     return {
       name: p.name, headline: p.headline, handle: p.handle,
+      portfolio: portfolioOf(p.id).map(({ title, summary, liveUrl, repoUrl, check, checkedAt }) => ({
+        title, summary, liveUrl, repoUrl, host: new URL(liveUrl).host, checkedAt,
+        check: check && { counts: check.counts, total: check.total, checks: check.checks.map(({ statement, status, explanation }) => ({ statement, status, explanation })) },
+      })),
       stats: {
         paidCents: paid.reduce((s, m) => s + m.releasedCents, 0), milestones: paid.length,
         firstTryRate: paid.length ? firstTry / paid.length : null, clients: new Set(paid.map((m) => m.clientId)).size,

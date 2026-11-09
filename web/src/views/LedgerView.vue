@@ -5,13 +5,15 @@
   kept as fee and paid out, with the PayPal ids behind each number. Freelancers read it as earnings
   across clients ("Money in"), clients as spend ("Money out"). The head stays put; the grid fills the rest.
   Click a row to open its contract; click an id to copy it; export what you see as CSV.
+  "Check against PayPal" reads every hold, release and payout back from PayPal and marks each row
+  Matches, Differs (with what differs) or Settling: Verdikt's numbers, proven against PayPal's own.
 -->
 <script setup>
 import { ref, computed, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { AgGridVue } from 'ag-grid-vue3'
 import { ModuleRegistry, AllCommunityModule, themeQuartz } from 'ag-grid-community'
-import { Download, Search, ScanSearch, X, CornerDownLeft } from 'lucide-vue-next'
+import { Download, Search, ScanSearch, X, CornerDownLeft, ShieldCheck } from 'lucide-vue-next'
 import { LEDGER_SCHEMA, toGrid, describe } from '@/domain/ledgerAsk'
 import AppShell from '@/layouts/AppShell.vue'
 import VButton from '@/components/ui/VButton.vue'
@@ -29,6 +31,30 @@ const auth = useAuthStore()
 const router = useRouter()
 const { data, loading } = useLive(() => api.listContracts())
 
+// ---- the PayPal check: { checkedAt, byId: milestoneId → { state, checks, title } }
+const checked = shallowRef(null)
+const checking = ref(false)
+async function checkPaypal() {
+  if (checking.value) return
+  checking.value = true
+  try {
+    const r = await api.reconcileLedger()
+    checked.value = { checkedAt: r.checkedAt, byId: new Map(r.milestones.map((m) => [m.milestoneId, m])), list: r.milestones }
+    const differs = r.milestones.filter((m) => m.state === 'differs').length
+    toast(differs ? `${differs} milestone${differs === 1 ? '' : 's'} differ from PayPal` : 'Every number matches PayPal')
+  } catch (e) {
+    toast(e.message, { tone: 'danger' })
+  } finally {
+    checking.value = false
+  }
+}
+const checkCounts = computed(() => {
+  const list = checked.value?.list || []
+  return { matches: list.filter((m) => m.state === 'matches').length, differs: list.filter((m) => m.state === 'differs'), waiting: list.filter((m) => m.state === 'waiting').length }
+})
+const CHECK = { matches: ['Matches PayPal', 'ok'], differs: ['Differs', 'danger'], waiting: ['Settling', 'warn'] }
+const shortTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+
 // ---- one row per milestone
 const rows = computed(() => (data.value || []).flatMap((c) => {
   const role = roleOf(c, auth.user?.id)
@@ -38,6 +64,7 @@ const rows = computed(() => (data.value || []).flatMap((c) => {
     const released = m.status === 'released' ? (m.releasedCents ?? m.amountCents) : (m.releasedCents || 0)
     return {
       contractId: c.id,
+      milestoneId: m.id,
       contract: c.title,
       milestone: `M${m.position} · ${m.title}`,
       side: role === 'freelancer' ? 'in' : 'out',
@@ -59,6 +86,7 @@ const rows = computed(() => (data.value || []).flatMap((c) => {
       capture: m.paypal?.captureId || '',
       payoutBatch: m.paypal?.payoutBatchId || '',
       currency: c.currency,
+      paypalCheck: checked.value?.byId.get(m.id)?.state || '',
     }
   })
 }))
@@ -119,6 +147,11 @@ const columnDefs = [
   {
     field: 'status', headerName: 'Status', width: 160,
     cellRenderer: (p) => (p.node.rowPinned ? '' : pill(STATUS[p.value]?.label || p.value, p.value === 'released' ? 'ok' : STATUS[p.value]?.tone)),
+  },
+  {
+    field: 'paypalCheck', headerName: 'PayPal check', width: 150,
+    cellRenderer: (p) => (p.value && !p.node.rowPinned ? pill(CHECK[p.value]?.[0] || p.value, CHECK[p.value]?.[1]) : ''),
+    tooltipValueGetter: (p) => checked.value?.byId.get(p.data?.milestoneId)?.checks.map((c) => `${c.what}: Verdikt ${c.verdikt} · PayPal ${c.paypal}${c.note ? ` — ${c.note}` : ''}`).join(' · ') || '',
   },
   ...MONEY.map((k) => ({
     field: k, type: 'numericColumn', width: 132, valueFormatter: usd, cellClass: 'vk-num',
@@ -247,6 +280,7 @@ const theme = themeQuartz.withParams({
               <Search :size="15" :stroke-width="1.9" />
               <input v-model="q" class="find__input" placeholder="Search contracts, people, ids" aria-label="Search the ledger" />
             </label>
+            <VButton variant="secondary" :icon="ShieldCheck" :loading="checking" @click="checkPaypal">Check against PayPal</VButton>
             <VButton variant="secondary" :icon="Download" @click="exportCsv">Export CSV</VButton>
           </div>
         </div>
@@ -268,6 +302,21 @@ const theme = themeQuartz.withParams({
           <button v-for="i in IDEAS" :key="i" type="button" class="ideas__chip" @click="ask(i)">{{ i }}</button>
         </div>
       </header>
+
+      <section v-if="checked" class="pp" aria-live="polite">
+        <p class="pp__line">
+          <ShieldCheck :size="15" aria-hidden="true" />
+          Checked against PayPal at {{ shortTime(checked.checkedAt) }}:
+          <span class="vk-num">{{ checkCounts.matches }}</span> match<template v-if="checkCounts.waiting">, <span class="vk-num">{{ checkCounts.waiting }}</span> still settling</template><template v-if="checkCounts.differs.length">, <strong class="pp__bad"><span class="vk-num">{{ checkCounts.differs.length }}</span> differ</strong></template>.
+          <span v-if="!checked.list.length" class="vk-faint">Nothing has reached PayPal yet.</span>
+        </p>
+        <ul v-if="checkCounts.differs.length" class="pp__list">
+          <li v-for="m in checkCounts.differs" :key="m.milestoneId">
+            <strong>{{ m.title }}</strong>
+            <span v-for="c in m.checks.filter((x) => x.met === false)" :key="c.what + c.id" class="pp__item">{{ c.what }}: Verdikt {{ c.verdikt }}, PayPal {{ c.paypal }}<template v-if="c.note"> — {{ c.note }}</template></span>
+          </li>
+        </ul>
+      </section>
 
       <div class="grid">
         <AgGridVue
@@ -317,6 +366,13 @@ const theme = themeQuartz.withParams({
 .head__sub { margin: 10px 0 0; max-width: 60ch; font: var(--vk-type-body); color: var(--vk-muted); }
 .head__stats .vk-stat__n { font: var(--vk-num-28); }
 .tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.pp { display: flex; flex-direction: column; gap: 6px; padding-top: 12px; }
+.pp__line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0; font: var(--vk-type-dense); color: var(--vk-ink); }
+.pp__line svg { color: var(--vk-muted); }
+.pp__bad { font-weight: 400; color: var(--vk-danger); }
+.pp__list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font: var(--vk-type-small); color: var(--vk-muted); }
+.pp__list strong { font-weight: 400; color: var(--vk-ink); margin-right: 6px; }
+.pp__item { display: block; padding-left: 21px; }
 .tools__right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .find {
   display: flex; align-items: center; gap: 8px; height: var(--vk-h-xl); padding: 0 16px; box-sizing: border-box;

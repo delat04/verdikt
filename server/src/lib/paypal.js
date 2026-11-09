@@ -113,6 +113,10 @@ export function captureAuthorization(authorizationId, { requestId, noteToPayer, 
   }, { requestId })
 }
 
+export function getCapture(captureId) {
+  return call('GET', `/v2/payments/captures/${captureId}`)
+}
+
 /** Refund before capture: drop the hold, the buyer is never charged. */
 export function voidAuthorization(authorizationId, { requestId } = {}) {
   return call('POST', `/v2/payments/authorizations/${authorizationId}/void`, undefined, { requestId })

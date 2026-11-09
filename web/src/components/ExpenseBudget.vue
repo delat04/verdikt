@@ -6,7 +6,7 @@
 -->
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { Receipt, Check, X, Minus, FileText, Upload, RefreshCw, Scale } from 'lucide-vue-next'
+import { Receipt, Check, X, Minus, FileText, Upload, RefreshCw, Scale, Search } from 'lucide-vue-next'
 import VButton from './ui/VButton.vue'
 import VField from './ui/VField.vue'
 import VPill from './ui/VPill.vue'
@@ -83,6 +83,48 @@ async function saveBudget(remove = false) {
   }
 }
 
+// ---- planned purchases: real products from live store listings (Channel3), pinned to the budget. A receipt from
+// the same store at about the listed price is the plan and reimburses on its own; anything else waits for the client
+const local = ref(null)       // the plan as the last pin/unpin returned it, until the milestone itself catches up
+watch(() => JSON.stringify(props.milestone.expenseProducts || []), () => { local.value = null })
+const planned = computed(() => local.value ?? props.milestone.expenseProducts ?? [])
+const plannedTotal = computed(() => planned.value.reduce((s, p) => s + p.priceCents, 0))
+const isPlanned = (id) => planned.value.some((p) => p.id === id)
+const query = ref('')
+const results = ref(null)
+const plannedBy = (p) => (p.plannedBy === props.role ? 'you' : p.plannedBy === 'client' ? clientName.value : freelancerName.value)
+async function findProducts() {
+  busy.value = 'search'
+  try {
+    results.value = await api.searchBudgetProducts(props.milestone.id, query.value)
+  } catch (e) {
+    toast(e.message, { tone: 'danger' })
+  } finally {
+    busy.value = ''
+  }
+}
+async function plan(p) {
+  busy.value = `plan:${p.id}`
+  try {
+    local.value = (await api.planProduct(props.milestone.id, p.id)).planned
+    toast(`Planned: ${p.title.length > 48 ? `${p.title.slice(0, 48)}…` : p.title}`)
+  } catch (e) {
+    toast(e.message, { tone: 'danger' })
+  } finally {
+    busy.value = ''
+  }
+}
+async function unplan(p) {
+  busy.value = `unplan:${p.id}`
+  try {
+    local.value = (await api.unplanProduct(props.milestone.id, p.id)).planned
+  } catch (e) {
+    toast(e.message, { tone: 'danger' })
+  } finally {
+    busy.value = ''
+  }
+}
+
 // ---- a claim, with its receipt
 const amount = ref('')
 const merchant = ref('')
@@ -107,6 +149,7 @@ const SAMPLES = isDemo ? [
   { key: 'inflated', label: 'hosting invoice, amount inflated', amount: '45.00', merchant: 'Stackhost', purpose: 'Hosting for the shop' },
   { key: 'lunch', label: 'lunch receipt', amount: '18.40', merchant: 'Corner Deli', purpose: 'Working lunch' },
   { key: 'blurry', label: 'blurry photo', amount: '12.00', merchant: 'Fontshop', purpose: 'Display font licence' },
+  { key: 'scanner', label: 'scanner receipt (planned at Walmart)', amount: '37.02', merchant: 'Walmart', purpose: 'QR scanner for the counter' },
 ] : []
 function useSample(s) {
   sample.value = s.key
@@ -237,6 +280,41 @@ async function act(e, kind) {
       </form>
     </section>
 
+    <!-- planned purchases, from live store listings -->
+    <section v-if="t.budget && !editing && (planned.length || (!settled && role))" class="xp__plan">
+      <div class="xp__plan-head">
+        <h3 class="xp__h3">Planned purchases</h3>
+        <span v-if="planned.length" class="xp__plan-sum vk-num">{{ $(plannedTotal) }} planned of {{ $(t.budget) }}</span>
+      </div>
+      <p class="xp__plan-sub">Pin real products from live store listings. A receipt from the same store at about the listed price is reimbursed on its own; anything off the plan waits for {{ clientName }}.</p>
+      <ul v-if="planned.length" class="xp__planned">
+        <li v-for="p in planned" :key="p.id">
+          <img v-if="p.image" :src="p.image" alt="" />
+          <div class="xp__p-body">
+            <a :href="p.url" target="_blank" rel="noopener sponsored" class="xp__p-title">{{ p.title }}</a>
+            <span class="xp__p-meta">{{ p.domain }} · listed at <span class="vk-num">{{ $(p.priceCents) }}</span> · planned by {{ plannedBy(p) }}{{ p.viaAgent ? ' (agent)' : '' }}</span>
+          </div>
+          <VButton v-if="!settled && role" size="sm" variant="ghost" :loading="busy === `unplan:${p.id}`" :disabled="!!busy" @click="unplan(p)">Remove</VButton>
+        </li>
+      </ul>
+      <form v-if="!settled && role" class="xp__shop" @submit.prevent="findProducts">
+        <input v-model="query" class="vk-input" maxlength="120" placeholder="What does the work need to buy? e.g. 2D barcode scanner" aria-label="Product to look for" />
+        <VButton type="submit" variant="secondary" :icon="Search" :loading="busy === 'search'" :disabled="query.trim().length < 3 || (!!busy && busy !== 'search')">Find in stores</VButton>
+      </form>
+      <template v-if="results">
+        <p v-if="!results.products.length" class="xp__plan-sub">Nothing in stock under {{ $(results.leftCents) }} for “{{ results.query }}”.</p>
+        <ul v-else class="xp__results">
+          <li v-for="p in results.products" :key="p.id">
+            <img v-if="p.image" :src="p.image" alt="" />
+            <a :href="p.url" target="_blank" rel="noopener sponsored" class="xp__p-title">{{ p.title }}</a>
+            <span class="xp__p-meta"><span class="vk-num xp__price">{{ $(p.priceCents) }}</span> · {{ p.domain }}</span>
+            <VButton size="sm" :variant="isPlanned(p.id) ? 'ghost' : 'secondary'" :disabled="isPlanned(p.id) || !!busy" :loading="busy === `plan:${p.id}`" @click="plan(p)">{{ isPlanned(p.id) ? 'Planned' : 'Plan this' }}</VButton>
+          </li>
+        </ul>
+      </template>
+      <p v-if="results || planned.length" class="xp__disclose">Listings from Channel3{{ results?.savedOn ? `, saved on ${results.savedOn} for the demo` : '' }}, in stock and within what's left of the budget. Links go through Channel3 and may earn a commission.</p>
+    </section>
+
     <!-- a claim -->
     <section v-if="canClaim" class="xp__claim">
       <h3 class="xp__h3">Claim an expense</h3>
@@ -361,6 +439,25 @@ async function act(e, kind) {
 .xp__est-src:hover { text-decoration: underline; }
 .xp__est-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 8px; font: var(--vk-type-small); }
 
+.xp__plan { display: flex; flex-direction: column; gap: 12px; padding-top: 18px; border-top: 1px solid var(--vk-line-subtle); }
+.xp__plan-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.xp__plan-head .xp__h3 { margin: 0; }
+.xp__plan-sum { font: var(--vk-type-small); color: var(--vk-muted); }
+.xp__plan-sub { margin: 0; font: var(--vk-type-small); color: var(--vk-muted); max-width: 70ch; }
+.xp__planned { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.xp__planned li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--vk-line); border-radius: var(--vk-r-md); background: var(--vk-surface); }
+.xp__planned img, .xp__results img { width: 52px; height: 52px; flex: none; object-fit: contain; border-radius: 8px; background: #fff; border: 1px solid var(--vk-line-subtle); }
+.xp__p-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.xp__p-title { font: var(--vk-type-dense); color: var(--vk-ink); text-decoration: none; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.xp__p-title:hover { color: var(--vk-accent-text); text-decoration: underline; }
+.xp__p-meta { font: var(--vk-type-small); color: var(--vk-muted); }
+.xp__shop { display: flex; gap: 8px; flex-wrap: wrap; }
+.xp__shop .vk-input { flex: 1; min-width: 220px; }
+.xp__results { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.xp__results li { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--vk-line); border-radius: var(--vk-r-md); background: var(--vk-surface); }
+.xp__results li > :last-child { align-self: flex-start; margin-top: auto; }
+.xp__price { color: var(--vk-ink); }
+.xp__disclose { margin: 0; font: var(--vk-type-small); color: var(--vk-faint); }
 .xp__claim { padding-top: 18px; border-top: 1px solid var(--vk-line-subtle); }
 .xp__h3 { margin: 0 0 12px; font: 400 16px/22px var(--vk-font); color: var(--vk-ink); }
 .xp__claim-form { display: flex; flex-direction: column; gap: 12px; }

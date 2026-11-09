@@ -1,0 +1,61 @@
+{
+  "title": "Verdikt — three-minute demo",
+  "beats": [
+    {
+      "id": "hook",
+      "slot": 13,
+      "title": "The question",
+      "screen": "The landing page: the hero, then a slow scroll through the story so the 3D mark goes from Agreed to Paid.",
+      "say": "AI agents can already shop for us. Next, they'll hire for us. But when an agent hires someone, who checks the work before the money moves?"
+    },
+    {
+      "id": "limit",
+      "slot": 21,
+      "title": "Approve once",
+      "screen": "Settings › Spending limit: Total $1,000, Most for one job $700, Lasts 28 days, What it's for “Website work for Northbrew”. Approve $1,000 on PayPal, approve the limit, and the card turns Active.",
+      "say": "Verdikt is escrow on PayPal for people and their agents. Maya runs a coffee shop. She approves one PayPal hold: a thousand dollars, at most seven hundred for one job, for four weeks. It's a hold, not a charge, and the only time she touches the money."
+    },
+    {
+      "id": "hire",
+      "slot": 30,
+      "title": "Her agent hires",
+      "screen": "A real run of Claude Opus 5.5 connected to Verdikt over MCP, replayed sped up: price_check finds $1,800–$5,000, Claude flags Maya's $400–$700 budget as low and asks first, she confirms, post_job. Then Jobs: three reviewed applications, QuickBuild Studio at 8 with the off-platform flag, and Sam hired.",
+      "say": "Her agent is Claude, connected to Verdikt over MCP. It prices the job from live web prices, flags that her budget is low, and posts it once she confirms. Three freelancers apply, and each application arrives reviewed: rules first, then Claude. This one asks to be paid by bank transfer or crypto, off the platform, where escrow can't protect anyone. It's flagged. Claude hires Sam."
+    },
+    {
+      "id": "terms",
+      "slot": 28,
+      "title": "Agents bargain, terms become tests",
+      "screen": "The contract room. Maya hands the negotiation to her agent with a private mandate (at most $560, within 7 days); Sam's agent already has his. The agents bargain from $600 to $550 and both accept. The signed checks show how each is checked, then Maya signs.",
+      "say": "Hiring opens a contract room. Maya's agent bargains with Sam's, each inside a private mandate. Their limits live in code, not in a prompt, and every agent message is labelled. They settle at five hundred and fifty. Every 'done means' line becomes a check a machine can run. The contract is a test suite. Both sides sign."
+    },
+    {
+      "id": "fund",
+      "slot": 15,
+      "title": "Funded from the limit",
+      "screen": "Fund with PayPal: $590, the $550 of work plus a $40 domain budget. “Hold $590.00 from my limit”, and it's held with no new PayPal approval.",
+      "say": "Funding comes out of her limit: five hundred and ninety dollars, the work plus a domain budget, held at once with no new PayPal approval. A job that didn't fit would need her."
+    },
+    {
+      "id": "deliver",
+      "slot": 24,
+      "title": "Sam's agent delivers",
+      "screen": "Sam's side: a pre-check of an incomplete build (two checks not met, one at 375px), then the complete build passing. The domain receipt claimed and reimbursed, and the delivery ready to submit.",
+      "say": "On the other side, Sam's coding agent runs a free pre-check against the signed checks. Two fail, so it fixes them and runs it again. It bought the domain, so it sends the receipt: rules check it, and PayPal pays it out in seconds, from the same hold. Then it submits."
+    },
+    {
+      "id": "verdict",
+      "slot": 24,
+      "title": "The verdict moves the money",
+      "screen": "Submit for checking, verification running check by check, then Paid: the milestone turns green and $539 lands in Sam's PayPal. Maya's spending limit shows what was paid and what's left.",
+      "say": "The verifier opens the site in a real browser, at desktop and phone sizes, and reads the code. Probes settle most checks without a model. Claude judges only what's left. Every check passes. PayPal captures five hundred and fifty dollars, Sam is paid, and the unspent budget goes back into Maya's limit, never charged."
+    },
+    {
+      "id": "close",
+      "slot": 20,
+      "title": "The ledger, and the close",
+      "screen": "The Ledger (AG Grid) with PayPal IDs; Ask › Biggest payouts sets the grid. End card: the mark, verdikt-leg2.onrender.com, “Try it with no account”, built with PayPal, Claude, MCP, AG Grid and Render.",
+      "say": "Every PayPal ID lands in the ledger, built on AG Grid, and you can ask it in plain words. Agents do the searching, the bargaining and the building. A person approves the money once. PayPal holds it, and the checks release it. That's Verdikt."
+    }
+  ]
+}

@@ -19,6 +19,9 @@ import verifierRoutes from './routes/verifier.js'
 import expenseRoutes, { resumeExpenses } from './routes/expenses.js'
 import jobRoutes from './routes/jobs.js'
 import limitRoutes from './routes/limits.js'
+import portfolioRoutes from './routes/portfolio.js'
+import scheduleRoutes from './routes/schedule.js'
+import studioRoutes, { studioDemoRoutes } from './routes/studio.js'
 import { renewHolds, resumePayouts } from './lib/flow.js'
 import { closeEndedLimits } from './lib/limits.js'
 import { syncDisputes } from './agent/defense.js'
@@ -65,6 +68,11 @@ await app.register(verifierRoutes, { prefix: '/api' })
 await app.register(expenseRoutes, { prefix: '/api' })
 await app.register(jobRoutes, { prefix: '/api' })
 await app.register(limitRoutes, { prefix: '/api' })
+await app.register(portfolioRoutes, { prefix: '/api' })
+await app.register(scheduleRoutes, { prefix: '/api' })
+await app.register(studioRoutes, { prefix: '/api' })
+// the demo's dashboard assistant: off unless STUDIO_DEMO_TURNS_PER_DAY gives it a budget
+await app.register(studioDemoRoutes, { prefix: '/api' })
 await app.register(agentRoutes, { prefix: '/api' })
 // any AI agent can use Verdikt with a personal token: Streamable HTTP MCP at /mcp
 await app.register(mcpRoutes)

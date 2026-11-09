@@ -8,6 +8,9 @@
     · POST /expenses/:id/approve|decline   client: settle a claim the checks couldn't
     · GET  /expenses/:id/receipt           either party: a short-lived link to the receipt
     · POST /expenses/:id/payout            either party: retry paying a reimbursed claim (e.g. after adding an email)
+    · POST /milestones/:id/expenses/products        either party: live product listings (Channel3) within what's left
+    · POST /milestones/:id/expenses/plan            either party: pin one of those listings as a planned purchase
+    · DELETE /milestones/:id/expenses/plan/:pid     either party: unpin it
     ============================================================================ */
 
 import { db, audit } from '../lib/supabase.js'
@@ -15,6 +18,7 @@ import { requireUser, milestoneFor } from '../lib/auth.js'
 import { HELD, reimburse, payoutExpense } from '../lib/flow.js'
 import { RECEIPT_TYPES, MAX_RECEIPT_BYTES, sha256, readReceipt, parseReceipt, checkExpense, decide } from '../agent/receipts.js'
 import { money } from '../lib/money.js'
+import { searchProducts } from '../lib/channel3.js'
 
 const MAX_BUDGET = 1_000_000
 const LIVE = ['checking', 'needs_client', 'approved']   // claims that hold part of the budget
@@ -155,7 +159,57 @@ export default async function expenseRoutes(app) {
       spent: money(b.spent, cur), waiting: money(b.waiting, cur), left: money(b.left, cur), left_cents: b.left,
       open: !!m.expense_budget_cents && HELD.includes(m.status) && !!m.paypal_authorization_id,
       claims: b.claims.map((e) => viewClaim(e, cur)),
+      planned: m.expense_products || [],
     }
+  })
+
+  // ---- planning the purchases: real listings from Channel3, pinned to the milestone. A receipt from the same
+  // store near the listed price reimburses on its own; anything off the plan waits for the client.
+  const found = new Map()   // milestone id → its last search; a pin is read from here, never from the request
+  app.post('/milestones/:id/expenses/products', async (request, reply) => {
+    const m = await milestoneFor(request, reply)
+    if (!m) return
+    if (!m.expense_budget_cents) return reply.code(409).send({ error: 'This milestone has no expense budget' })
+    if (SETTLED.includes(m.status)) return reply.code(409).send({ error: 'This milestone is already settled' })
+    const query = String(request.body?.query || '').trim().slice(0, 120)
+    if (query.length < 3) return reply.code(400).send({ error: 'Say what to look for, e.g. “2D barcode scanner”' })
+    if (!allow(`products:${m.id}`, 30)) return reply.code(429).send({ error: 'That’s 30 product searches this hour — try again later' })
+    const b = await budgetOf(m)
+    let products
+    try {
+      products = await searchProducts(query, { maxCents: b.left })
+    } catch (e) {
+      request.log.warn(e, 'product search failed')
+      return reply.code(502).send({ error: 'Product search is unavailable right now — try again in a minute' })
+    }
+    found.set(m.id, { at: Date.now(), byId: new Map(products.map((p) => [p.id, p])) })
+    return { query, leftCents: b.left, products }
+  })
+
+  app.post('/milestones/:id/expenses/plan', async (request, reply) => {
+    const m = await milestoneFor(request, reply)
+    if (!m) return
+    if (SETTLED.includes(m.status)) return reply.code(409).send({ error: 'This milestone is already settled' })
+    const last = found.get(m.id)
+    const p = last && Date.now() - last.at < 3600e3 ? last.byId.get(String(request.body?.productId || '')) : null
+    if (!p) return reply.code(409).send({ error: 'Search again, then pin a product from the results' })
+    const planned = (m.expense_products || []).filter((x) => x.id !== p.id)
+    if (planned.length >= 6) return reply.code(409).send({ error: 'Up to 6 planned purchases per milestone' })
+    const next = [...planned, { ...p, plannedBy: m.role, viaAgent: !!request.user.viaToken, at: new Date().toISOString() }]
+    await db().from('milestones').update({ expense_products: next }).eq('id', m.id)
+    await audit({ contractId: m.contract.id, milestoneId: m.id, actor: m.role, event: 'expense.product_planned', payload: { title: p.title, domain: p.domain, priceCents: p.priceCents, viaAgent: !!request.user.viaToken } })
+    return { planned: next }
+  })
+
+  app.delete('/milestones/:id/expenses/plan/:pid', async (request, reply) => {
+    const m = await milestoneFor(request, reply)
+    if (!m) return
+    const p = (m.expense_products || []).find((x) => x.id === request.params.pid)
+    if (!p) return reply.code(404).send({ error: 'Not a planned purchase' })
+    const next = m.expense_products.filter((x) => x.id !== p.id)
+    await db().from('milestones').update({ expense_products: next }).eq('id', m.id)
+    await audit({ contractId: m.contract.id, milestoneId: m.id, actor: m.role, event: 'expense.product_unplanned', payload: { title: p.title, domain: p.domain } })
+    return { planned: next }
   })
 
   // ---- a claim: the receipt rides along as base64 (≤ 5 MB)
