@@ -3,14 +3,22 @@
     so the result is always schema-valid JSON we can store and show.
     Optionally the model may first use tools on a remote MCP server (PayPal's) — Anthropic runs those
     calls server-side; we only read the trace of what it looked up.
+    With OPENROUTER_API_KEY set, the same calls go to Claude through OpenRouter's Anthropic-compatible
+    endpoint instead (e.g. bring-your-own-key); otherwise straight to Anthropic with ANTHROPIC_API_KEY.
     ============================================================================ */
 
 import Anthropic from '@anthropic-ai/sdk'
 
-export const MODEL = process.env.VERDIKT_MODEL || 'claude-opus-5-5'
+const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || ''
+// the SDK adds /v1/messages itself, so a base URL copied with /v1 on the end is trimmed
+const OPENROUTER_BASE = (process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api').replace(/\/v1\/?$/, '')
+
+export const MODEL = process.env.VERDIKT_MODEL || (OPENROUTER_KEY ? 'anthropic/claude-opus-5.5' : 'claude-opus-5-5')
 
 let client = null
-const anthropic = () => (client ??= new Anthropic())
+const anthropic = () => (client ??= OPENROUTER_KEY
+  ? new Anthropic({ baseURL: OPENROUTER_BASE, apiKey: null, authToken: OPENROUTER_KEY })
+  : new Anthropic())
 
 export class AgentError extends Error {}
 
@@ -35,9 +43,10 @@ export async function callAgent({ system, content, tool, effort = 'high', mcpSer
     const response = await anthropic().beta.messages.create({
       model: MODEL,
       max_tokens: 16000,
-      // On a policy decline, re-run on Anthropic's recommended fallback model instead of failing
-      betas: ['server-side-fallback-2026-07-01', ...(mcpServers?.length ? ['mcp-client-2025-11-20'] : [])],
-      fallbacks: 'default',
+      // On a policy decline, re-run on Anthropic's recommended fallback model instead of failing.
+      // OpenRouter's endpoint rejects this field, so through it a decline is reported as one.
+      betas: [...(OPENROUTER_KEY ? [] : ['server-side-fallback-2026-07-01']), ...(mcpServers?.length ? ['mcp-client-2025-11-20'] : [])],
+      ...(OPENROUTER_KEY ? {} : { fallbacks: 'default' }),
       output_config: { effort },
       system,
       ...(mcpServers?.length ? { mcp_servers: mcpServers } : {}),

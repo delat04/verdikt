@@ -24,6 +24,9 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
+      # or Claude through OpenRouter: when set, used instead of ANTHROPIC_API_KEY
+      - key: OPENROUTER_API_KEY
+        sync: false
       - key: PLATFORM_FEE_PERCENT
         value: "2"
       # read at build time — public, they ship to the browser

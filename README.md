@@ -49,7 +49,7 @@ With no Supabase keys the app runs in **demo mode** (or set `VITE_DEMO=true`): e
 
 ## Run it for real (live mode)
 
-**Prerequisites:** Node 22.9+, Chrome installed (the verifier drives it), a [PayPal developer](https://developer.paypal.com) sandbox app, a [Supabase](https://supabase.com) project, an [Anthropic](https://console.anthropic.com) API key.
+**Prerequisites:** Node 22.9+, Chrome installed (the verifier drives it), a [PayPal developer](https://developer.paypal.com) sandbox app, a [Supabase](https://supabase.com) project, an [Anthropic](https://console.anthropic.com) API key (or an [OpenRouter](https://openrouter.ai) key as `OPENROUTER_API_KEY`, which routes the same Claude calls through OpenRouter).
 
 **Fastest way to enter the keys:** `cd server && npm run setup` opens a local form. Paste the PayPal sandbox keys (and Supabase / Anthropic when you have them); each one is checked with its service, then written to `server/.env` and `web/.env`. The keys stay on your computer. You can also fill the files by hand, as below.
 
