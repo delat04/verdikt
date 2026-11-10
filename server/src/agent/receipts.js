@@ -2,8 +2,10 @@
     Receipts — an expense claim is checked the way a delivery is: deterministic rules first, Claude last.
     The receipt is read locally (a PDF's own text layer, or OCR for a photo or screenshot), then rules check
     that the amount is on it, it fits the budget, it's dated inside the contract, it wasn't claimed before and
-    it's something the budget covers. Claude is asked only when the rules can't tell whether the purchase is
-    covered — text only, low effort. Every check says what it saw, so either side can verify it by eye.
+    it's something the budget covers. A receipt that names an item on the shopping list both sides agreed to
+    is covered by that alone; one from a list store that names no agreed item goes to the client, unasked.
+    Claude is asked only when the rules can't tell whether the purchase is covered — text only, low effort.
+    Every check says what it saw, so either side can verify it by eye.
     ============================================================================ */
 
 import { createHash } from 'node:crypto'
@@ -12,6 +14,7 @@ import { readScreens } from './ocr.js'
 import { callAgent } from './claude.js'
 import { scanForInjection } from './guard.js'
 import { money } from '../lib/money.js'
+import { COVER_SUGGESTIONS, coveredByRules, matchList, listChecks } from './expenseRules.js'
 
 export const RECEIPT_TYPES = { 'application/pdf': 'pdf', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }
 export const MAX_RECEIPT_BYTES = 5 * 1024 * 1024
@@ -97,33 +100,9 @@ export function parseReceipt(text) {
   }
 }
 
-// ---------------------------------------------------------------- what a budget covers
-// words that show up on receipts for each kind of project expense (matched on the receipt only, never on
-// what the claimant typed: a claim can't talk itself into coverage)
-const KINDS = [
-  { label: 'Domain', match: /\b(domain|registrar|dns)\b/, words: ['domain', 'registrar', 'dns', 'namecheap', 'godaddy', 'porkbun', 'gandi', 'dynadot', 'name.com', 'hover', 'google domains', 'squarespace domains', 'cloudflare registrar'] },
-  { label: 'Hosting', match: /\b(host|hosting|server|cloud|deploy)/, words: ['hosting', 'vercel', 'netlify', 'render', 'heroku', 'fly.io', 'railway', 'digitalocean', 'linode', 'hetzner', 'amazon web services', 'aws', 'google cloud', 'azure', 'cloudflare', 'supabase', 'firebase', 'hostinger', 'bluehost', 'siteground', 'wp engine', 'vps', 'cdn'] },
-  { label: 'Stock photos', match: /\b(stock|photo|image|picture)/, words: ['shutterstock', 'getty images', 'istock', 'adobe stock', 'depositphotos', 'envato', 'stock photo', 'image license', 'unsplash'] },
-  { label: 'Fonts', match: /\b(font|type)/, words: ['font', 'fonts', 'typeface', 'myfonts', 'fontspring', 'adobe fonts', 'typekit', 'webfont', 'foundry'] },
-  { label: 'Icons & illustrations', match: /\b(icon|illustration|graphic)/, words: ['icons8', 'noun project', 'flaticon', 'streamline', 'iconscout', 'illustration', 'icon pack'] },
-  { label: 'API credits', match: /\b(api|credit|usage|token)/, words: ['api', 'credits', 'openai', 'anthropic', 'twilio', 'sendgrid', 'mapbox', 'google maps platform', 'algolia', 'postmark', 'resend', 'mailgun'] },
-  { label: 'Software licenses', match: /\b(software|licen[cs]e|plugin|tool|app)/, words: ['license', 'licence', 'plugin', 'figma', 'jetbrains', 'github', 'adobe', 'framer', 'webflow', 'shopify'] },
-  { label: 'Email', match: /\b(e-?mail|mailbox|workspace)/, words: ['google workspace', 'zoho mail', 'fastmail', 'microsoft 365', 'mailbox'] },
-]
-export const COVER_SUGGESTIONS = KINDS.map((k) => k.label)
-const wordRe = (w) => new RegExp(`(^|[^a-z0-9])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^a-z0-9])`, 'i')
-
-/** Does the receipt name something one of the budget's lines covers? → { cover, word } or null */
-export function coveredByRules(covers, text) {
-  const t = String(text || '').toLowerCase()
-  for (const cover of covers) {
-    const c = cover.toLowerCase()
-    const kind = KINDS.find((k) => k.label.toLowerCase() === c || k.match.test(c))
-    const own = c.split(/[^a-z0-9.]+/).filter((w) => w.length >= 4)
-    for (const w of [...(kind?.words || []), ...own]) if (wordRe(w).test(t)) return { cover, word: w }
-  }
-  return null
-}
+// ---------------------------------------------------------------- what a budget covers, and the shopping list
+// the rules live in expenseRules.js, shared byte for byte with the demo; this file runs them on a real receipt
+export { COVER_SUGGESTIONS, coveredByRules }
 
 const SYSTEM = `You decide one thing for Verdikt's expense check: is a purchase something a project's expense budget covers?
 The client agreed to reimburse only what the budget lists. Deterministic rules already checked the amount, date,
@@ -172,18 +151,22 @@ async function coveredByModel(covers, { text, merchant, purpose }) {
 
 // ---------------------------------------------------------------- the checks
 const day = 864e5
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const dateOf = (iso) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : `${MON[d.getUTCMonth()]} ${d.getUTCDate()}` }   // 'Nov 9'
 
 /**
  * @param {object} p
  * @param {object} p.claim      { amountCents, merchant, purpose }
  * @param {object} p.receipt    { text, via, error, parsed, sha }
- * @param {object} p.milestone  { expense_budget_cents, expense_covers }
+ * @param {object} p.milestone  { expense_budget_cents, expense_covers, expense_products }
  * @param {object} p.contract   { created_at, currency }
  * @param {number} p.committedCents   other claims already approved or waiting
  * @param {object|null} p.duplicate   { at, why } an earlier live claim of the same receipt
- * @returns {Promise<{ checks: Array, tokens: number }>}
+ * @param {string[]} [p.usedIds]      list items another live claim already bought
+ * @param {string} [p.clientName]     who decides what the rules can't, e.g. 'Maya'
+ * @returns {Promise<{ checks: Array, tokens: number, planned: Array<{ id, title, domain, image }> }>}
  */
-export async function checkExpense({ claim, receipt, milestone, contract, committedCents, duplicate }) {
+export async function checkExpense({ claim, receipt, milestone, contract, committedCents, duplicate, usedIds = [], clientName = 'The client' }) {
   const cur = contract.currency || 'USD'
   const $ = (c) => money(c, cur)
   const p = receipt.parsed
@@ -232,30 +215,29 @@ export async function checkExpense({ claim, receipt, milestone, contract, commit
   if (claimed <= left) add('budget', 'Fits the expense budget', 'pass', `${$(claimed)} of the ${$(left)} left (budget ${$(budget)}).`)
   else add('budget', 'Fits the expense budget', 'fail', `You claimed ${$(claimed)}; ${$(left)} of the ${$(budget)} budget is left.`, left >= 100 ? `Claim ${$(left)} or less, or agree a bigger budget with a change order.` : 'The budget is used up.')
 
-  // planned purchases (pinned from live listings): the same store, from 10% under to 20% over the listed price
-  // (tax and shipping), is the plan and reimburses on its own; anything else waits for the client
-  const planned = Array.isArray(milestone.expense_products) ? milestone.expense_products : []
-  if (planned.length) {
-    const said = `${receipt.text}\n${claim.merchant || ''}`.toLowerCase()
-    const store = (domain) => domain.toLowerCase().replace(/^www\./, '').split('.')[0]   // bestbuy.com → bestbuy
-    const match = planned.find((x) => (said.includes(x.domain.toLowerCase()) || said.includes(store(x.domain)))
-      && claimed >= Math.round(x.priceCents * 0.9) && claimed <= Math.round(x.priceCents * 1.2))
-    if (match) add('planned', 'A planned purchase', 'pass', `Planned: ${match.title} at ${match.domain}, listed at ${$(match.priceCents)} when it was planned.`)
-    else add('planned', 'A planned purchase', 'unknown', `Not one of the ${planned.length} planned purchase${planned.length === 1 ? '' : 's'}: no planned store at about this price.`, 'The client confirms purchases that weren’t planned.')
-  }
+  // the shopping list (pinned from live Channel3 listings): the receipt prints a list store and a line names an
+  // agreed item no other claim bought, at about its price. Read from the receipt only, never from what the
+  // claimant typed. Claims exist only on funded milestones, and those are signed.
+  const list = cur === 'USD'
+    ? matchList({ items: milestone.expense_products || [], text: receipt.text, claimedCents: claimed, signed: true, usedIds })
+    : { kind: 'none', matches: [] }
+  checks.push(...listChecks(list, { $, dateOf, clientName }))
 
   // a receipt that talks to the AI is a tampered receipt
   const injected = scanForInjection({ views: { desktop: { text: receipt.text } } }, null).visible
   if (injected.length) add('integrity', 'No instructions to the checker', 'fail', `The receipt contains text addressed to the AI checking it: “${injected[0].quote.slice(0, 120)}”.`, 'Upload the original receipt.')
 
-  // covered: the receipt names a budget line (rules), else Claude reads it — only when the rest could still pass
+  // covered: an agreed list item, or the receipt names a budget line (rules); a list store with no agreed item
+  // goes to the client; else Claude reads it — only when the rest could still pass
   let tokens = 0
   const covers = milestone.expense_covers || []
   const ruled = readable ? coveredByRules(covers, receipt.text) : null
   if (!covers.length) add('covered', 'Something the budget covers', 'pass', 'The budget is for any project expense.')
+  else if (list.kind === 'match') add('covered', 'Something the budget covers', 'pass', `On the shopping list both of you agreed: ${list.matches.map((m) => m.title).join(', ')}.`)
   else if (ruled) add('covered', 'Something the budget covers', 'pass', `The receipt mentions “${ruled.word}” — covered as ${ruled.cover}.`)
   else if (!readable) add('covered', 'Something the budget covers', 'unknown', 'The receipt could not be read, so coverage was not checked.')
   else if (checks.some((c) => c.status === 'fail')) add('covered', 'Something the budget covers', 'unknown', 'Not checked: another check already failed.')
+  else if (list.kind === 'store_only') add('covered', 'Something the budget covers', 'unknown', 'Not an item on the list, and the receipt names none of the budget lines.', `${clientName} decides.`)
   else {
     try {
       const out = await coveredByModel(covers, { text: receipt.text, merchant: claim.merchant || '', purpose: claim.purpose || '' })
@@ -266,12 +248,13 @@ export async function checkExpense({ claim, receipt, milestone, contract, commit
       add('covered', 'Something the budget covers', 'unknown', 'The receipt names none of the budget lines, and the model was unavailable.', '', 'rules')
     }
   }
-  return { checks, tokens }
+  return { checks, tokens, planned: list.matches.map((m) => ({ id: m.id, title: m.title, domain: m.domain, image: m.image })) }
 }
 
-/** All pass → reimburse; one fails → rejected; otherwise the client decides. */
+/** All pass → reimburse; one fails → rejected; otherwise the client decides. 'info' rows explain, never decide. */
 export function decide(checks) {
-  if (checks.some((c) => c.status === 'fail')) return 'rejected'
-  if (checks.every((c) => c.status === 'pass')) return 'approved'
+  const rows = checks.filter((c) => c.status !== 'info')
+  if (rows.some((c) => c.status === 'fail')) return 'rejected'
+  if (rows.every((c) => c.status === 'pass')) return 'approved'
   return 'needs_client'
 }

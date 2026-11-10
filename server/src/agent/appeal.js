@@ -8,6 +8,7 @@
 
 import { callTool } from './claude.js'
 import { db, audit } from '../lib/supabase.js'
+import { syncMilestones } from '../lib/precedent.js'
 
 const SYSTEM = `You are the second reviewer in an escrow service. A first verifier failed some acceptance checks on a
 delivery, and one party has appealed. Re-examine only the checks that failed, independently.
@@ -83,6 +84,9 @@ async function review(appealId) {
     await db().from('appeals').update({
       status: 'decided', recommendation, release_cents: releaseCents, summary, findings, decided_at: new Date().toISOString(),
     }).eq('id', appealId)
+    // precedent picks up the upheld checks now; an overturn waits for the client's accept (delivery.js syncs
+    // again then). In the background, never on the money path
+    void syncMilestones([m.id])
     // an upheld verdict goes straight back to "fix and resubmit"; a release waits for the client
     if (recommendation === 'uphold') await db().from('milestones').update({ status: 'failed' }).eq('id', m.id)
     await audit({

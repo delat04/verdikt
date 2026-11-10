@@ -209,8 +209,8 @@ async function sample() {
             >
               <VButton v-if="lead" :icon="ArrowRight" :to="lead.to">{{ lead.label }}</VButton>
               <VButton :variant="lead ? 'secondary' : 'primary'" :icon="Plus" to="/contracts/new">Create a contract</VButton>
-              <VButton v-if="isDemo && !lead" variant="secondary" :loading="loadingSample" @click="sample">Load a sample contract</VButton>
-              <VButton v-if="isDemo && !lead" variant="secondary" :loading="loadingRoom" @click="sampleRoom">Open a sample contract room</VButton>
+              <VButton v-if="isDemo" variant="secondary" :loading="loadingSample" @click="sample">Load a sample contract</VButton>
+              <VButton v-if="isDemo" variant="secondary" :loading="loadingRoom" @click="sampleRoom">Open a sample contract room</VButton>
               <VButton variant="ghost" :icon="KeyRound" to="/join">I have an invite code</VButton>
             </VEmptyState>
           </VNotchCard>
@@ -233,7 +233,7 @@ async function sample() {
               v-if="upNext.step.action && ACTION[upNext.step.action]"
               size="lg" :icon="ACTION[upNext.step.action].icon"
               :to="{ path: `/contracts/${upNext.c.id}`, query: { act: upNext.step.action } }"
-            >{{ ACTION[upNext.step.action].label }}</VButton>
+            >{{ upNext.step.actionLabel || ACTION[upNext.step.action].label }}</VButton>
             <VButton size="lg" variant="secondary" :icon-right="ArrowRight" :to="`/contracts/${upNext.c.id}`">Open</VButton>
           </NextStepCard>
 

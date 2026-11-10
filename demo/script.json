@@ -40,15 +40,15 @@
       "id": "deliver",
       "slot": 24,
       "title": "Sam's agent delivers",
-      "screen": "Sam's side: a pre-check of an incomplete build (two checks not met, one at 375px), then the complete build passing. The domain receipt claimed and reimbursed, and the delivery ready to submit.",
-      "say": "On the other side, Sam's coding agent runs a free pre-check against the signed checks. Two fail, so it fixes them and runs it again. It bought the domain, so it sends the receipt: rules check it, and PayPal pays it out in seconds, from the same hold. Then it submits."
+      "screen": "Sam's side: a pre-check of an incomplete build (two checks not met, one at 375px), then the complete build passing. Expenses: the Walmart receipt for the Netum barcode scanner on the shopping list (“scanner from the list”, $37.02) is reimbursed by rules, with “Bought at a store on the list”, “The item on the list” and “At the agreed price” passed and no Claude tag; then “same store, other item” goes to Maya (Client decides). The delivery is ready to submit.",
+      "say": "On the other side, Sam's coding agent runs a free pre-check against the signed checks. Two fail, so it fixes them and runs it again. It bought the barcode scanner on the shopping list both of them signed. The receipt names it, from Walmart, at the listed price, so rules reimburse it in seconds from the same PayPal hold, with no model. The same store and price for a different item goes to Maya. Then it submits."
     },
     {
       "id": "verdict",
       "slot": 24,
       "title": "The verdict moves the money",
-      "screen": "Submit for checking, verification running check by check, then Paid: the milestone turns green and $539 lands in Sam's PayPal. Maya's spending limit shows what was paid and what's left.",
-      "say": "The verifier opens the site in a real browser, at desktop and phone sizes, and reads the code. Probes settle most checks without a model. Claude judges only what's left. Every check passes. PayPal captures five hundred and fifty dollars, Sam is paid, and the unspent budget goes back into Maya's limit, never charged."
+      "screen": "Submit for checking, verification running check by check. In the report, “Watch what the verifier saw” plays the Kernel recording (jump to Phone · 375px), and under a check Claude judged, the “In line with … similar checks on other contracts” line opens the Elastic cases. Then Paid: the milestone turns green and $539 lands in Sam's PayPal. Maya's spending limit shows what was paid and what's left.",
+      "say": "The verifier opens the site in a cloud browser on Kernel, recorded so both can watch it. Probes settle most checks. For the rest, Elastic finds how similar checks were decided, and Claude judges. Every check passes. PayPal captures five hundred and fifty dollars, Sam is paid, and the unspent budget returns to Maya's limit."
     },
     {
       "id": "close",

@@ -5,6 +5,7 @@
 **/*.log
 web/dist
 server/scripts/.tmp-*
+server/test
 .git
 .claude
 thumbnail

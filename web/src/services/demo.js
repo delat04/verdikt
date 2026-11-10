@@ -4,14 +4,22 @@
     The agent and PayPal are simulated here; live mode calls the real ones.
     ============================================================================ */
 
-import { split, money } from '@/domain/format'
+import { split, money, firstName } from '@/domain/format'
 import { mediateDemo, agentMove, emptyTerms, blankState } from './demoMediator'
 import { askLocal } from '@/domain/ledgerAsk'
 import { SAMPLE_PRODUCTS, SAVED_ON } from './demoProducts'
+import { RECEIPTS, SAMPLE_BUDGET, SAVED_AS_OF, sampleShoppingList, sampleChecks, decide } from './demoReceipts'
+import { LIST_MAX, statusFor, canRemove, canAgree, canDecline, listError, outstandingCents, itemLifecycle } from '@/domain/expenseRules'
 import { sampleHistory } from './demoHistory'
 import { claudeAdapter } from './claudeStudio'
+import SAMPLES from './replays.json'
+import { momentFor } from '@/domain/replay'
+import { samplePrecedent, SAMPLE_CASES } from './demoPrecedent'
 
-const KEY = 'verdikt-demo-v1'
+// v2: the sample story is reseeded for the sponsor integrations, so a browser that kept the older story starts
+// over instead of mixing the two
+const KEY = 'verdikt-demo-v2'
+const STALE_KEYS = ['verdikt-demo-v1']
 const listeners = new Set()
 
 export const PERSONAS = {
@@ -65,6 +73,7 @@ function blank() {
 let db = load()
 function load() {
   try {
+    for (const k of STALE_KEYS) localStorage.removeItem(k)   // an older story's state, never read again
     const raw = localStorage.getItem(KEY)
     return raw ? JSON.parse(raw) : blank()
   } catch {
@@ -174,19 +183,51 @@ ${flawRect}</svg>`
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
 }
 
+// ---------------------------------------------------------------- the sample deliveries, recorded on Kernel
+// The demo's deliveries are real pages Verdikt serves (web/public/samples). server/scripts/record-samples.js ran
+// the verifier's browser code on each in Kernel's cloud when the demo was built, and replays.json holds what it
+// measured, its screenshots and the recording. A delivery gets them only when its URL is one of those pages.
+const sampleName = (sub) => /\/samples\/([\w-]+)\.html$/.exec(sub?.liveUrl || '')?.[1] || null
+const sampleOf = (sub) => SAMPLES[sampleName(sub)] || null
+/** The recording and where the check ran, as the server's report.replay and report.site carry them. */
+function recordingOf(sub) {
+  const s = sampleOf(sub)
+  if (!s) return { replay: null, site: { recording: 'demo_only' } }
+  const { facts, shots, delivered, ...replay } = s
+  return { replay: { ...replay, by: 'kernel', sample: true }, site: { browser: 'kernel', region: s.region, chrome: s.chrome, recording: 'recorded', sample: true } }
+}
+/** The 'verify.recorded' row for a sample recording, as the server audits it. */
+const recordedRow = (s) => ({ seconds: s.seconds, sha256: s.sha256.slice(0, 16), session: s.session.slice(0, 8), region: s.region, sample: true })
+
+// the sample's real screenshot when there is one, else the drawn stand-in
+const shotOf = (sub, view, drawn) => sampleOf(sub)?.shots?.[view] || shot(drawn)
+
 function judge(criterion, submission) {
   const weak = /incomplete|draft|v1|wip/i.test(`${submission.liveUrl} ${submission.repoUrl} ${submission.notes}`)
   const s = criterion.statement.toLowerCase()
+  const f = sampleOf(submission)?.facts
   if (weak && s.includes('horizontal scrolling')) {
-    return { passed: false, confidence: 0.94, explanation: 'At 375px the pricing card is 412px wide, so the page scrolls sideways and the card is cut off on the right.', evidence: [{ type: 'screenshot', label: 'Mobile · 375px', url: shot({ mobile: true, flaw: 'overflow' }) }, { type: 'log', label: 'Layout scan', text: '.pricing-card  width 412px > viewport 375px\n.hero-img      width 398px > viewport 375px' }] }
+    const layout = f?.mobile?.layout?.offenders?.join('\n') || '.pricing-card  width 412px > viewport 375px\n.hero-img      width 398px > viewport 375px'
+    return { passed: false, confidence: 0.94, explanation: 'At 375px the pricing card is 412px wide, so the page scrolls sideways and the card is cut off on the right.', evidence: [{ type: 'screenshot', label: 'Mobile · 375px', url: shotOf(submission, 'mobile', { mobile: true, flaw: 'overflow' }) }, { type: 'log', label: 'Layout scan', text: layout }] }
   }
   if (weak && s.includes('form')) {
-    return { passed: false, confidence: 0.91, explanation: 'Submitting the form with a valid address returns a 404 from /api/subscribe, and no confirmation appears.', evidence: [{ type: 'screenshot', label: 'After submit · desktop', url: shot({ flaw: 'form' }) }, { type: 'log', label: 'Network', text: 'POST /api/subscribe → 404 Not Found\nconsole: Uncaught (in promise) SyntaxError' }] }
+    const network = f?.form ? f.form.responses.join('\n') : 'POST /api/subscribe → 404 Not Found\nconsole: Uncaught (in promise) SyntaxError'
+    return { passed: false, confidence: 0.91, explanation: 'Submitting the form with a valid address returns a 404 from /api/subscribe, and no confirmation appears.', evidence: [{ type: 'screenshot', label: 'After submit · desktop', url: shotOf(submission, 'form', { flaw: 'form' }) }, { type: 'log', label: 'Network', text: network }] }
+  }
+  // the first shop build (samples/northbrew-shop-v1.html) leaves two of its six product cards without a price.
+  // Most similar checks elsewhere were met, so Claude says why this one departs from them
+  if (weak && s.includes('cart')) {
+    return {
+      passed: false, confidence: 0.86,
+      explanation: 'Two of the six product cards show no price, so the cart total can’t be checked against the listed price. Show a price on every card.',
+      departsBecause: 'The similar deliveries showed a price on every product.',
+      evidence: [{ type: 'screenshot', label: 'Desktop · 1440px', url: shotOf(submission, 'desktop') }],
+    }
   }
   const evidence = {
-    visual: [{ type: 'screenshot', label: 'Desktop · 1440px', url: shot() }],
-    functional: [{ type: 'screenshot', label: 'Desktop · 1440px', url: shot() }, { type: 'screenshot', label: 'Mobile · 375px', url: shot({ mobile: true }) }],
-    performance: [{ type: 'log', label: 'Trace', text: 'LCP 1.84 s · CLS 0.02 · TBT 90 ms (median of 3)' }],
+    visual: [{ type: 'screenshot', label: 'Desktop · 1440px', url: shotOf(submission, 'desktop') }],
+    functional: [{ type: 'screenshot', label: 'Desktop · 1440px', url: shotOf(submission, 'desktop') }, { type: 'screenshot', label: 'Mobile · 375px', url: shotOf(submission, 'mobile', { mobile: true }) }],
+    performance: [{ type: 'log', label: 'Trace', text: f ? `LCP ${(f.desktop.lcpMs / 1000).toFixed(2)} s at 1440px · ${(f.mobile.lcpMs / 1000).toFixed(2)} s at 375px` : 'LCP 1.84 s · CLS 0.02 · TBT 90 ms (median of 3)' }],
     content: [{ type: 'log', label: 'Copy check', text: '14 of 14 brief sentences found · 0 placeholders' }],
     code: [{ type: 'log', label: 'Repository', text: 'npm ci && npm run build → ok (31 s)\nsecret scan → 0 findings · .env in .gitignore' }],
   }[criterion.kind] || []
@@ -211,8 +252,76 @@ function demoSpec(cr) {
 }
 const specOf = (cr) => cr.spec || demoSpec(cr)
 
-// what each probe measured on a demo delivery: "incomplete" builds overflow at 375px and their form 404s
+// What a sample delivery's recording measured, in the server's exact words (server/src/agent/probes.js RUN):
+// the probes the recorded facts can answer. null for any other probe, which keeps the demo's own text.
+const PX = { desktop: 1440, mobile: 375 }
+const viewsOf = (p, fallback) => ((p.viewport || fallback) === 'both' ? ['desktop', 'mobile'] : [p.viewport || fallback])
+const codeOf = (line) => Number(/→ (\d{3})/.exec(line)?.[1])
+function measured(p, f) {
+  const ok = (observed) => ({ status: 'pass', observed })
+  const no = (observed, fix) => ({ status: 'fail', observed, ...(fix && { fix }) })
+  switch (p.type) {
+    case 'loads': {
+      for (const vp of viewsOf(p, 'both')) {
+        if (f[vp].status >= 400) return no(`At ${PX[vp]}px the server answered HTTP ${f[vp].status}.`, 'The live URL must answer with a 2xx status.')
+      }
+      return ok(`HTTP ${f.desktop.status ?? '—'}, loaded in ${f.desktop.loadMs ?? '—'} ms.`)
+    }
+    case 'no_console_errors': {
+      for (const vp of viewsOf(p, 'both')) {
+        const errors = f[vp].consoleErrors || []
+        if (errors.length) return no(`${errors.length} console error${errors.length > 1 ? 's' : ''} at ${PX[vp]}px: ${errors.slice(0, 2).join(' | ')}`, 'Fix the errors in the browser console.')
+      }
+      return ok('No console errors.')
+    }
+    case 'no_failed_requests': {
+      const bad = f.desktop.failedRequests || []
+      if (bad.length) return no(`${bad.length} request${bad.length > 1 ? 's' : ''} to the site failed: ${bad.slice(0, 3).join(' | ')}`, 'Every file and API call on the site must answer without an error.')
+      return ok('Every request to the site succeeded.')
+    }
+    case 'no_horizontal_scroll': {
+      const l = f.mobile.layout
+      if (!l) return null
+      if (l.scrollWidth > l.viewport + 1) {
+        const first = l.offenders[0]
+        return no(`At ${l.viewport}px the page is ${l.scrollWidth}px wide${first ? `; widest offender: ${first}` : ''}.`, `Make ${first ? first.split(/\s/)[0] : 'the widest element'} fit a ${l.viewport}px screen.`)
+      }
+      return ok(`At ${l.viewport}px the page is exactly ${l.scrollWidth}px wide.`)
+    }
+    case 'form_submits': {
+      const form = f.form
+      if (!form) return { status: 'unknown', observed: 'No form with an email field was found to submit.' }
+      const bad = form.responses.filter((x) => codeOf(x) >= 400)
+      if (bad.length) return no(`Submitting the form failed: ${bad.join(' | ')}.`, 'The form’s endpoint must accept a valid submission.')
+      const thanks = form.newText.find((l) => /thank|success|subscribed|confirm|received|you'?re (in|on)|welcome|sent/i.test(l))
+      if (form.responses.some((x) => codeOf(x) < 400) || thanks) return ok(`Submitted: ${[...form.responses, thanks && `“${thanks}”`].filter(Boolean).join(' · ')}.`)
+      return { status: 'unknown', observed: 'The form was submitted but no request or confirmation was seen.' }
+    }
+    case 'lcp_under': {
+      const views = viewsOf(p, 'both')
+      for (const vp of views) {
+        if (!f[vp].lcpMs) return null
+        if (f[vp].lcpMs > p.ms) return no(`At ${PX[vp]}px the main content painted in ${(f[vp].lcpMs / 1000).toFixed(2)} s; the limit is ${(p.ms / 1000).toFixed(1)} s.`, 'Make the largest element (often the hero image) load faster: compress it, size it, preload it.')
+      }
+      return ok(`Painted in ${views.map((vp) => `${(f[vp].lcpMs / 1000).toFixed(2)} s at ${PX[vp]}px`).join(', ')}.`)
+    }
+    case 'element': {
+      const q = f.desktop.queries?.[p.selector]
+      if (!q || q.invalid) return null
+      const min = p.min ?? 1
+      if (q.visible < min) return no(`Found ${q.visible} visible \`${p.selector}\` (${q.count} in the page); needs at least ${min}.`)
+      return ok(`${q.visible} visible \`${p.selector}\`${q.samples.length ? `: ${q.samples.slice(0, 3).map((s) => `“${s}”`).join(', ')}` : ''}.`)
+    }
+    default: return null
+  }
+}
+
+// what each probe measured on a demo delivery: "incomplete" builds overflow at 375px and their form 404s. A
+// recorded sample delivery answers from its real facts instead
 function measure(p, sub) {
+  const facts = sampleOf(sub)?.facts
+  const real = facts && measured(p, facts)
+  if (real) return real
   const weak = /incomplete|draft|v1|wip/i.test(`${sub.liveUrl} ${sub.repoUrl} ${sub.notes}`)
   const repo = (sub.repoUrl || '').replace(/^https?:\/\/github\.com\//, '')
   const ok = (observed, via) => ({ status: 'pass', observed, ...(via && { via }) })
@@ -258,7 +367,29 @@ function demoEval(cr, sub) {
 
 const strip = (probes) => probes.map(({ fix, label, ...x }) => x)
 const tokensFor = (judged) => (judged ? { input: 1800 + judged * 2400, output: 160 + judged * 120 } : { input: 0, output: 0 })
-const fakeHash = () => Array.from({ length: 64 }, () => '0123456789abcdef'[Math.floor(Math.random() * 16)]).join('')
+/**
+ * The verdict's receipt, deterministic like the server's receiptOf: the same delivery (a sample's recording by its
+ * sha-256), the same checks and the same results give the same receipt on every load. A stable string hash
+ * stretched to 64 hex characters: the demo has no evidence bytes to put through sha-256.
+ */
+function demoReceipt(m, sub, results) {
+  const text = JSON.stringify([
+    sampleOf(sub)?.sha256 || sub.liveUrl || '', sub.repoUrl || '',
+    m.criteria.map((cr) => {
+      const r = results.find((x) => x.criterionId === cr.id)
+      return [cr.statement, r ? r.passed : null, r?.layer || null]
+    }),
+  ])
+  let out = ''
+  for (let seed = 1; seed <= 8; seed++) {
+    let h = Math.imul(0x811c9dc5 ^ seed, 0x9e3779b1) >>> 0
+    for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193) >>> 0
+    h = Math.imul(h ^ (h >>> 16), 0x85ebca6b) >>> 0
+    h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35) >>> 0
+    out += ((h ^ (h >>> 16)) >>> 0).toString(16).padStart(8, '0')
+  }
+  return out
+}
 
 function demoSummary(results, criteria, tampered) {
   const failed = results.filter((r) => !r.passed)
@@ -269,34 +400,48 @@ function demoSummary(results, criteria, tampered) {
   return `All ${results.length} checks passed against the signed terms — ${how}. Releasing the held payment.`
 }
 
-/** A whole verdict at once (sample data); runVerification below plays the same thing out live. */
-function verdictFor(m, sub, previous = null) {
+/**
+ * A whole verdict at once (sample data); runVerification below plays the same thing out live. A check Claude
+ * judges carries its precedent from the sample cases (never this contract's), as the server attaches Elastic's;
+ * a reused answer keeps the evidence it was given with.
+ */
+function verdictFor(c, m, sub, previous = null) {
   const results = m.criteria.map((cr) => {
     const e = demoEval(cr, sub)
     const j = judge(cr, sub)
     if (e.status !== 'judge') return { criterionId: cr.id, passed: e.status === 'pass', confidence: 0.99, explanation: e.explanation, evidence: j.evidence, layer: e.layer, probes: strip(e.probes) }
     const old = previous?.results.find((r) => r.criterionId === cr.id && ['model', 'reused'].includes(r.layer) && ['content', 'code'].includes(cr.kind))
     if (old) return { ...old, layer: 'reused', probes: strip(e.probes) }
-    return { criterionId: cr.id, ...j, evidence: [...(j.evidence || []), ...demoPrecedent(cr, j.passed)], layer: 'model', probes: strip(e.probes) }
+    const { departsBecause, ...said } = j   // like the server's departs_because: kept on the precedent, not the row
+    const precedent = samplePrecedent(cr.statement, cr.kind, { contractId: c.id, passed: j.passed, departsBecause })
+    return { criterionId: cr.id, ...said, evidence: [...(said.evidence || []), ...(precedent ? [precedent] : [])], layer: 'model', probes: strip(e.probes) }
   })
-  return results
+  // a recorded sample: each check first points at the second in the video where it was measured, by the same
+  // rules the server uses (domain/replay.js). The marks are the measure moments; the chapters name them
+  // (an answer reused from the last attempt drops that attempt's moment: it belongs to the other video)
+  const s = sampleOf(sub)
+  return results.map((r) => {
+    const evidence = (r.evidence || []).filter((e) => e.type !== 'moment')
+    const moment = s?.marks?.length ? momentFor(r, [...s.chapters, ...s.marks]) : null
+    return { ...r, evidence: moment ? [moment, ...evidence] : evidence }
+  })
 }
 
-// Precedent in the demo: similar checks from the sample history, as Elastic would return them live
-const PRECEDENT = {
-  visual: [['Nothing wider than the screen at 375px', 'the layout scan found no element wider than the viewport'], ['Above the fold shows the headline, call to action and logo', 'all three visible in the desktop screenshot'], ['The hero image fits on a phone without cropping the headline', 'the headline was cut off at 375px']],
-  functional: [['The form accepts a valid email and shows a confirmation', 'a thank-you message appeared after submitting'], ['The contact form sends and confirms', 'the form posted and the page showed “…”'], ['The signup form shows a confirmation after a valid email', 'the request failed with a 404 and nothing confirmed']],
-  content: [['The menu page lists the prices from the brief', 'every listed price matched the brief'], ['The about section uses the copy from the brief', 'the copy matched, with one heading reworded'], ['Prices match the agreed price list', 'two prices differed from the list']],
-  code: [['Repository has a README with setup steps', 'README explains install and run'], ['No secrets or .env files committed', 'no env files in the tree']],
-  performance: [['Main content paints in under 2.5 s on mobile', 'measured 1.9 s at 375px']],
+/**
+ * report.precedent for a demo verdict, as the server records it: which checks Claude judged, how many of them
+ * found similar cases and how many cases in all. status 'sample': the cases are the demo's fixed set, not an
+ * Elastic search. null when Claude judged nothing (the server searches only for those checks).
+ */
+function precedentReportOf(results) {
+  const asked = results.filter((r) => r.layer === 'model')
+  if (!asked.length) return null
+  const found = asked.map((r) => r.evidence?.find((e) => e.type === 'precedent')).filter(Boolean)
+  return { status: 'sample', asked: asked.map((r) => r.criterionId), matched: found.length, cases: found.reduce((s, p) => s + p.items.length, 0), corpus: SAMPLE_CASES.length }
 }
-function demoPrecedent(cr, passed) {
-  const pool = PRECEDENT[cr.kind] || PRECEDENT.functional
-  const items = pool.slice(0, 3).map(([statement, reason], i) => ({ statement, reason, met: i < 2 ? passed : !passed }))
-  return [{ type: 'precedent', label: `Precedent · ${items.length} similar checks`, met: items.filter((x) => x.met).length, notMet: items.filter((x) => !x.met).length, items }]
-}
-// the verifier's session as video: live verifications record their own on Kernel; the demo shows a real example
-const SAMPLE_REPLAY = { url: '/replays/kernel-sample.mp4', seconds: 27, by: 'kernel', sample: true }
+// the browser stage, step by step, as the server pushes it (inspectSite's onStep): desktop, its form test, then
+// the phone view. Nothing records during the demo's walk: a sample delivery says its run is the Kernel recording
+// made when the demo was built, and anything else says only that a browser is opening
+const STEPS = [['desktop', 900], ['form', 700], ['mobile', 900]]
 
 const running = new Set()
 async function runVerification(milestoneId) {
@@ -309,26 +454,45 @@ async function runVerification(milestoneId) {
     const previous = m.submissions.at(-2)?.verdict || null
     const by = {}
     m.status = 'verifying'
-    m.progress = { ...Object.fromEntries(m.criteria.map((cr) => [cr.id, 'running'])), '@': { stage: 'browser', by } }
+    const sample = sampleOf(sub)
+    // nothing is recorded now: a sample says it plays back its Kernel run (no live clock), anything else ran nowhere
+    m.progress = { ...Object.fromEntries(m.criteria.map((cr) => [cr.id, 'running'])), '@': { stage: 'browser', by, browser: sample ? 'kernel' : 'local', recording: false, sample: !!sample, step: 'open', startedAt: now() } }
     log(c, 'agent', 'verify.started', { attempt: sub.attempt }, m.id)
     save()
-    await wait(1500)
+    await wait(600)
+    const form = m.criteria.some((cr) => /form/i.test(cr.statement))
+    for (const [step, ms] of STEPS) {
+      if (step === 'form' && !form) continue
+      ;({ c, m } = findMilestone(milestoneId))
+      m.progress['@'].step = step
+      save()
+      await wait(ms)
+    }
 
-    // ---- the deterministic pass: every probe-decided check lands at once
+    // ---- the deterministic pass: every probe-decided check lands at once. The browser is done: no step, no recording
     ;({ c, m } = findMilestone(milestoneId))
-    m.progress['@'].stage = 'probes'
+    const { recording, sample: replaying, step, path, ...rest } = m.progress['@']
+    m.progress['@'] = { ...rest, stage: 'probes' }
     save()
     await wait(700)
     ;({ c, m } = findMilestone(milestoneId))
-    const all = verdictFor(m, sub, previous)
+    const all = verdictFor(c, m, sub, previous)
     for (const r of all) if (['probe', 'ocr', 'reused'].includes(r.layer)) { m.progress[r.criterionId] = r.passed ? 'pass' : 'fail'; by[r.criterionId] = r.layer }
     m.progress['@'].by = { ...by }
     save()
 
-    // ---- Claude, only for what's left
+    // ---- Claude, only for what's left: first the similar checks on other contracts (the sample cases here,
+    // Elastic live), shown beside the stage line until the verdict lands
     const left = all.filter((r) => r.layer === 'model')
+    const seen = precedentReportOf(all)
     if (left.length) {
       await wait(500)
+      ;({ c, m } = findMilestone(milestoneId))
+      m.progress['@'].stage = 'precedent'
+      // status and sample: the stage and the line beside it say these are the sample history's, not an Elastic search
+      m.progress['@'].precedent = { status: 'sample', sample: true, asked: seen.asked.length, matched: seen.matched, cases: seen.cases }
+      save()
+      await wait(700)
       ;({ c, m } = findMilestone(milestoneId))
       m.progress['@'].stage = 'model'
       save()
@@ -357,11 +521,12 @@ async function runVerification(milestoneId) {
       createdAt: now(),
       summary: demoSummary(results, m.criteria, tampered),
       results,
-      replay: SAMPLE_REPLAY,
+      ...recordingOf(sub),
+      precedent: seen,
       engine: {
         version: 'probes-1', decided, tokens: tokensFor(left.length),
         probes: { run: results.reduce((s, r) => s + r.probes.length, 0), passed: results.reduce((s, r) => s + r.probes.filter((p) => p.status === 'pass').length, 0), failed: results.reduce((s, r) => s + r.probes.filter((p) => p.status === 'fail').length, 0) },
-        ms: { total: Date.now() - started }, receipt: fakeHash(),
+        ms: { total: Date.now() - started }, receipt: demoReceipt(m, sub, results),
       },
       integrity: tampered ? {
         detected: true,
@@ -371,6 +536,7 @@ async function runVerification(milestoneId) {
     }
     delete m.progress
     m.status = outcome === 'pass' ? 'passed' : 'failed'
+    if (sample) log(c, 'agent', 'verify.recorded', recordedRow(sample), m.id)
     if (tampered) log(c, 'agent', 'verify.tamper', { quotes: target.verdict.integrity.quotes }, m.id)
     log(c, 'agent', outcome === 'pass' ? 'verify.passed' : 'verify.failed', { failed: failed.length, total: results.length, tampered, decided }, m.id)
     save()
@@ -497,62 +663,62 @@ function sendPayout(c, m, tranche) {
 }
 
 // ---------------------------------------------------------------- expenses (simulated receipts)
-// the live app reads the receipt on the server (PDF text, or OCR) and runs these checks with rules; the demo
-// carries the text each sample receipt would read as, and decides the same way
-const RECEIPTS = {
-  domain: { via: 'pdf', merchant: 'Domainly Registrar', total: 3298, ref: 'DL-48213', lines: ['Domain registration — northbrew.coffee (1 year)  $32.98', 'DNS hosting  $0.00', 'Total paid  $32.98'], covered: { word: 'domain', cover: 'Domain' } },
-  inflated: { via: 'pdf', merchant: 'Stackhost', total: 2000, ref: 'SH-20412', lines: ['Starter plan — 1 project  $20.00', 'Total due  $20.00'], covered: { word: 'hosting', cover: 'Hosting' } },
-  lunch: { via: 'ocr', merchant: 'Corner Deli', total: 1840, ref: '', lines: ['Turkey sandwich  $11.50', 'Flat white  $4.40', 'Brownie  $2.50', 'Total  $18.40'], covered: null },
-  blurry: { via: 'ocr', merchant: '', total: null, ref: '', lines: ['F0nt sh0p ... l1cen5e', '... :: ...'], covered: null },
-  hosting: { via: 'pdf', merchant: 'Stackhost', total: 2000, ref: 'SH-19876', lines: ['Starter plan — 1 project  $20.00', 'Total paid  $20.00'], covered: { word: 'hosting', cover: 'Hosting' } },
-  scanner: { via: 'pdf', merchant: 'Walmart', total: 3702, ref: 'WM-77310', lines: ['walmart.com order WM-77310', '2D Barcode Scanner  $34.20', 'Sales tax  $2.82', 'Order total  $37.02'], covered: { word: 'scanner', cover: 'Hardware' } },
-}
+// the live app reads the receipt on the server (PDF text, or OCR) and runs agent/receipts.js; the demo carries
+// the text each sample receipt reads as (demoReceipts.js) and runs the same rules on it, in the same order
 const receiptFiles = new Map()   // expense id → an uploaded File, for this tab only
 const LIVE_CLAIM = ['checking', 'needs_client', 'approved']
 const spentOf = (m) => (m.expenses || []).filter((e) => e.captureId).reduce((s, e) => s + e.amountCents, 0)
 
+// the inputs the live route gathers before it checks a claim: what other live claims hold, the items they
+// bought, and an earlier claim of the same receipt
 function demoExpenseChecks(c, m, claim, key) {
+  const others = (m.expenses || []).filter((e) => e.id !== claim.id && LIVE_CLAIM.includes(e.status))
   const r = RECEIPTS[key]
-  const $ = (x) => money(x, c.currency)
-  const day = new Date().toISOString().slice(0, 10)
-  const checks = []
-  const add = (k, label, status, observed, fix = '', by = 'rules') => checks.push({ key: k, label, status, observed, fix, by })
-  const readable = r && r.total != null
-  add('readable', 'The receipt can be read', readable ? 'pass' : 'unknown', !r ? 'Demo mode does not read uploaded files; the live app reads the PDF text or runs OCR on the image.'
-    : readable ? `Read ${r.via === 'pdf' ? "from the PDF's text" : 'with OCR from the image'}: ${r.lines.length} lines, 1 date.` : 'No amounts could be read from the image.', readable ? '' : 'Upload the PDF receipt, or a sharper photo of the whole receipt.')
-  if (!readable) add('amount', 'The amount is on the receipt', 'unknown', 'The receipt could not be read, so the amount was not compared.')
-  else if (claim.amountCents === r.total) add('amount', 'The amount is on the receipt', 'pass', `Total on the receipt: ${$(r.total)}.`)
-  else if (claim.amountCents > r.total) add('amount', 'The amount is on the receipt', 'fail', `You claimed ${$(claim.amountCents)}; the receipt's total is ${$(r.total)}.`, `Claim ${$(r.total)} or less.`)
-  else add('amount', 'The amount is on the receipt', 'unknown', `${$(claim.amountCents)} is less than the total (${$(r.total)}) but isn't a line on the receipt.`)
-  add('date', 'Bought during the contract', readable ? 'pass' : 'unknown', readable ? `Dated ${day}; the contract started ${c.createdAt.slice(0, 10)}.` : 'The receipt could not be read, so the date was not checked.')
-  const others = (m.expenses || []).filter((e) => e.id !== claim.id)
-  const dup = r && others.find((e) => e.sample === key && LIVE_CLAIM.includes(e.status))
-  if (dup) add('unique', 'Not claimed before', 'fail', `${r.ref ? `Order ${r.ref}` : 'This exact receipt'} was already claimed on ${dup.createdAt.slice(0, 10)}.`, 'Each receipt is reimbursed once.')
-  else add('unique', 'Not claimed before', 'pass', r?.ref ? `No earlier claim has this file, or order ${r.ref} for this total.` : 'No earlier claim has this file.')
-  const committed = others.filter((e) => LIVE_CLAIM.includes(e.status)).reduce((s, e) => s + e.amountCents, 0)
-  const left = Math.max(0, m.expenseBudgetCents - committed)
-  if (claim.amountCents <= left) add('budget', 'Fits the expense budget', 'pass', `${$(claim.amountCents)} of the ${$(left)} left (budget ${$(m.expenseBudgetCents)}).`)
-  else add('budget', 'Fits the expense budget', 'fail', `You claimed ${$(claim.amountCents)}; ${$(left)} of the ${$(m.expenseBudgetCents)} budget is left.`, 'Claim less, or agree a bigger budget with a change order.')
-  // planned purchases, as the live rules: the same store, 10% under to 20% over the listed price
-  const planned = m.expenseProducts || []
-  if (planned.length) {
-    const said = `${(r?.lines || []).join('\n')}\n${claim.merchant || r?.merchant || ''}`.toLowerCase()
-    const store = (domain) => domain.toLowerCase().replace(/^www\./, '').split('.')[0]
-    const match = planned.find((x) => (said.includes(x.domain.toLowerCase()) || said.includes(store(x.domain)))
-      && claim.amountCents >= Math.round(x.priceCents * 0.9) && claim.amountCents <= Math.round(x.priceCents * 1.2))
-    if (match) add('planned', 'A planned purchase', 'pass', `Planned: ${match.title} at ${match.domain}, listed at ${$(match.priceCents)} when it was planned.`)
-    else add('planned', 'A planned purchase', 'unknown', `Not one of the ${planned.length} planned purchase${planned.length === 1 ? '' : 's'}: no planned store at about this price.`, 'The client confirms purchases that weren’t planned.')
-  }
-  let tokens = 0
-  if (r?.covered) add('covered', 'Something the budget covers', 'pass', `The receipt mentions “${r.covered.word}” — covered as ${r.covered.cover}.`)
-  else if (!readable) add('covered', 'Something the budget covers', 'unknown', 'The receipt could not be read, so coverage was not checked.')
-  else if (checks.some((x) => x.status === 'fail')) add('covered', 'Something the budget covers', 'unknown', 'Not checked: another check already failed.')
-  else {
-    tokens = 640
-    add('covered', 'Something the budget covers', 'fail', 'A sandwich, coffee and a brownie from a deli are a meal, not a domain, hosting or a font.', `The budget covers ${m.expenseCovers.join(', ')}.`, 'claude')
-  }
-  return { checks, tokens, via: r?.via || '' }
+  const dup = r && others.find((e) => e.sample === key)
+  return sampleChecks({
+    key, claim, milestone: m, contract: c,
+    committedCents: others.reduce((s, e) => s + e.amountCents, 0),
+    duplicate: dup ? { why: `${r.ref ? `Order ${r.ref}` : 'This exact receipt'} was already claimed on ${dup.createdAt.slice(0, 10)}.` } : null,
+    usedIds: others.flatMap((e) => (e.extracted?.planned || []).map((p) => p.id)),
+    clientName: firstName(c.client?.name || '') || 'The client',
+    $: (x) => money(x, c.currency),
+  })
 }
+
+// ---- the shopping list, as the live routes keep it (routes/expenses.js): the same guards, codes and sentences
+// (expenseRules.listError), thrown the way live.js throws an API refusal
+function refuse(code, o = {}) {
+  const { http, ...body } = listError(code, { $: (x) => money(x, 'USD'), ...o })
+  throw Object.assign(new Error(body.error), { status: http, ...body })
+}
+const signedBoth = (c) => !!(c.clientSignedAt && c.freelancerSignedAt)
+// the budget left after claims reimbursed or waiting, and what the list may still add on top of its open items
+const leftOf = (m) => Math.max(0, (m.expenseBudgetCents || 0) - (m.expenses || []).filter((e) => LIVE_CLAIM.includes(e.status)).reduce((s, e) => s + e.amountCents, 0))
+const listRoom = (m) => leftOf(m) - outstandingCents(m.expenseProducts || [], m.expenses || [])
+function listClosed(c, m) {
+  if (['released', 'refunded'].includes(m.status)) return 'settled'
+  if (!m.expenseBudgetCents) return 'no_budget'
+  if ((c.currency || 'USD') !== 'USD') return 'currency'
+  return null
+}
+// changing the list before both sign is changing the terms → true when it cleared a signature
+function resetSignatures(c) {
+  if (!c.clientSignedAt && !c.freelancerSignedAt) return false
+  c.clientSignedAt = null
+  c.freelancerSignedAt = null
+  return true
+}
+const listItem = (m, id) => (m.expenseProducts || []).find((x) => x.id === id)
+
+// the saved Channel3 listings stand in for the store search: by id, like the live app re-reads a pin, so a pin
+// works after a reload and whoever searched
+const savedListing = (p) => ({ currency: 'USD', inStock: true, offers: [{ domain: p.domain, priceCents: p.priceCents, url: p.url, inStock: true }], ...p })
+const SAVED = new Map(Object.values(SAMPLE_PRODUCTS).flat().map((p) => [p.id, p]))
+const SAVED_LABEL = (() => {
+  const [y, mo, d] = SAVED_ON.split('-').map(Number)
+  return `Saved Channel3 listings from ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][mo - 1]} ${d}, ${y}. The live app searches stores each time.`
+})()
+const SAVED_SETS = 'The demo has saved listings for barcode scanners, tablet stands and receipt printers.'
 
 function reimburseDemo(c, m, e, by) {
   e.captureId = code('DEMO-CAP')
@@ -640,7 +806,6 @@ function portfolioOf(userId) {
   return (db.portfolio[userId] ||= [])
 }
 const folioItem = ({ failing, ...x }) => clone(x)
-const demoFound = new Map()   // milestone id → its last product search; a pin is read from here, like the live app
 
 function demoReview(job, a) {
   const $ = (c) => money(c, job.currency)
@@ -1264,6 +1429,7 @@ export const demo = {
     const { c, m } = findMilestone(milestoneId)
     if (assertParty(c) !== 'client') throw new Error('Only the client can request a refund.')
     if (m.status !== 'failed') throw new Error('Refunds need a failed verdict.')
+    if (!m.submissions.at(-1)?.verdict) throw new Error('This check didn’t finish, so there’s no verdict to refund on. The freelancer can submit again to re-run it.')
     // check by check, the freelancer keeps the tranches already released; the rest of the hold is voided
     const kept = m.releasedCents || 0
     m.status = kept ? 'released' : 'refunded'
@@ -1444,11 +1610,16 @@ export const demo = {
     const role = assertParty(c)
     if (c.clientSignedAt && c.freelancerSignedAt) throw new Error('Terms are signed by both parties and locked')
     if (budgetCents && !covers.length) throw new Error('Say what the budget covers — a domain, hosting, fonts…')
+    // the budget has to hold the list it pays for; no budget, no list
+    const items = m.expenseProducts || []
+    const listCents = items.length ? outstandingCents(items, m.expenses || []) : 0
+    if (budgetCents && budgetCents < listCents) refuse('below_list', { listCents })
     m.expenseBudgetCents = budgetCents
     m.expenseCovers = budgetCents ? covers : []
+    if (!budgetCents) m.expenseProducts = []
     c.clientSignedAt = null
     c.freelancerSignedAt = null
-    log(c, role, 'terms.expense_budget', { milestone: m.position, budgetCents, covers: m.expenseCovers }, m.id)
+    log(c, role, 'terms.expense_budget', { milestone: m.position, budgetCents, covers: m.expenseCovers, ...(!budgetCents && items.length ? { listCleared: items.length } : {}) }, m.id)
     save()
   },
   // moving a due date after signing: one side proposes, the other accepts or declines
@@ -1491,45 +1662,108 @@ export const demo = {
     save()
     return { ok: true }
   },
-  // planned purchases from real Channel3 listings saved for the demo (the live app searches Channel3 each time)
+  // the shopping list, from real Channel3 listings saved for the demo (the live app searches Channel3 each time).
+  // Same guards, codes and events as routes/expenses.js; the consent rules are expenseRules.js
   async searchBudgetProducts(milestoneId, query) {
     await wait(700 + Math.random() * 500)
     const { c, m } = findMilestone(milestoneId)
     assertParty(c)
-    if (!m.expenseBudgetCents) throw new Error('This milestone has no expense budget')
-    const q = String(query || '').toLowerCase()
-    if (q.trim().length < 3) throw new Error('Say what to look for, e.g. “2D barcode scanner”')
-    const kind = /scan|qr|barcode/.test(q) ? 'scanner' : /stand|mount|kiosk|tablet/.test(q) ? 'stand' : /print/.test(q) ? 'printer' : null
-    const pool = kind ? SAMPLE_PRODUCTS[kind] : Object.values(SAMPLE_PRODUCTS).flat().filter((p) => q.split(/\s+/).some((w) => w.length > 3 && p.title.toLowerCase().includes(w)))
-    const spent = (m.expenses || []).filter((e) => LIVE_CLAIM.includes(e.status)).reduce((s, e) => s + e.amountCents, 0)
-    const left = Math.max(0, m.expenseBudgetCents - spent)
-    const products = pool.filter((p) => p.priceCents <= left).map((p) => ({ ...p, currency: 'USD', inStock: true }))
-    demoFound.set(m.id, new Map(products.map((p) => [p.id, p])))
-    return { query, leftCents: left, products, savedOn: SAVED_ON }
+    const closed = listClosed(c, m)
+    if (closed) refuse(closed, { currency: c.currency })
+    const q = String(query || '').trim()
+    if (q.length < 3 || q.length > 120) refuse('query')
+    const cap = listRoom(m)
+    if (cap < 100) refuse('no_room')
+    const words = q.toLowerCase()
+    const kind = /scan|qr|barcode/.test(words) ? 'scanner' : /stand|mount|kiosk|tablet/.test(words) ? 'stand' : /print/.test(words) ? 'printer' : null
+    const pool = kind ? SAMPLE_PRODUCTS[kind] : Object.values(SAMPLE_PRODUCTS).flat().filter((p) => words.split(/\s+/).some((w) => w.length > 3 && p.title.toLowerCase().includes(w)))
+    const products = pool.map(savedListing).filter((p) => p.inStock && p.priceCents <= cap)
+    return {
+      query: q, leftCents: leftOf(m), capCents: cap, products, asOf: SAVED_ON, cached: false, via: 'saved',
+      saved: true, savedOn: SAVED_ON, savedNote: SAVED_LABEL,
+      // nothing saved for these words: say what the demo has, and offer it
+      ...(pool.length ? {} : { suggestions: ['barcode scanner', 'tablet stand', 'receipt printer'], emptyNote: SAVED_SETS }),
+    }
   },
   async planProduct(milestoneId, productId) {
     await latency()
     const { c, m } = findMilestone(milestoneId)
     const role = assertParty(c)
-    const p = demoFound.get(m.id)?.get(productId)
-    if (!p) throw new Error('Search again, then pin a product from the results')
-    const planned = (m.expenseProducts || []).filter((x) => x.id !== p.id)
-    if (planned.length >= 6) throw new Error('Up to 6 planned purchases per milestone')
-    m.expenseProducts = [...planned, { ...p, plannedBy: role, viaAgent: false, at: now() }]
-    log(c, role, 'expense.product_planned', { title: p.title, domain: p.domain, priceCents: p.priceCents }, m.id)
+    const pid = String(productId || '').trim()
+    if (!/^[A-Za-z0-9_-]{3,64}$/.test(pid)) refuse('no_product')
+    const closed = listClosed(c, m)
+    if (closed) refuse(closed, { currency: c.currency })
+    const items = m.expenseProducts || []
+    if (items.some((x) => x.id === pid)) return { planned: clone(items), unchanged: true }
+    if (items.length >= LIST_MAX) refuse('list_full')
+    const found = SAVED.get(pid)
+    if (!found) refuse('gone')
+    const p = savedListing(found)
+    if (!p.inStock) refuse('out_of_stock', { domain: p.domain })
+    const room = listRoom(m)
+    if (p.priceCents > room) refuse('over_budget', { priceCents: p.priceCents, roomCents: room })
+    const signed = signedBoth(c)
+    const status = statusFor({ signedBoth: signed, role })
+    const at = now()
+    // asOf: the saved listing's date, so the price on the list says when it was read
+    const item = { ...p, plannedBy: role, viaAgent: false, at, asOf: SAVED_AS_OF, status, ...(status === 'agreed' ? { agreedBy: 'client', agreedAt: at } : {}) }
+    m.expenseProducts = [...items, item]
+    const reset = signed ? false : resetSignatures(c)
+    log(c, role, 'expense.product_planned', { productId: p.id, title: p.title, brand: p.brand, domain: p.domain, priceCents: p.priceCents, status, viaAgent: false, resetSignatures: reset }, m.id)
+    save()
+    return { planned: clone(m.expenseProducts), item: clone(item), resetSignatures: reset }
+  },
+  // the client agrees to an item the freelancer proposed after signing
+  async agreePlanItem(milestoneId, productId) {
+    await latency()
+    const { c, m } = findMilestone(milestoneId)
+    const role = assertParty(c)
+    if (['released', 'refunded'].includes(m.status)) refuse('settled')
+    const item = listItem(m, productId)
+    if (!item) refuse('not_on_list')
+    const verdict = canAgree(item, { role, signedBoth: signedBoth(c), lifecycle: itemLifecycle(item, m.expenses || []) })
+    if (!verdict.ok) refuse(verdict.code)
+    // the item already counts in what the list holds for: the list as a whole has to fit what's left
+    const left = leftOf(m)
+    const outstanding = outstandingCents(m.expenseProducts, m.expenses || [])
+    if (outstanding > left) refuse('over_budget', { priceCents: item.priceCents, roomCents: left - (outstanding - item.priceCents) })
+    Object.assign(item, { status: 'agreed', agreedBy: 'client', agreedAt: now() })
+    log(c, 'client', 'expense.product_agreed', { productId: item.id, title: item.title, domain: item.domain, priceCents: item.priceCents, viaAgent: false }, m.id)
+    save()
+    return { planned: clone(m.expenseProducts), item: clone(item) }
+  },
+  // the client declines it: it leaves the list
+  async declinePlanItem(milestoneId, productId, reason = '') {
+    await latency()
+    const { c, m } = findMilestone(milestoneId)
+    const role = assertParty(c)
+    if (['released', 'refunded'].includes(m.status)) refuse('settled')
+    const item = listItem(m, productId)
+    if (!item) refuse('not_on_list')
+    const verdict = canDecline(item, { role, signedBoth: signedBoth(c), lifecycle: itemLifecycle(item, m.expenses || []) })
+    if (!verdict.ok) refuse(verdict.code)
+    m.expenseProducts = m.expenseProducts.filter((x) => x.id !== item.id)
+    log(c, 'client', 'expense.product_declined', { productId: item.id, title: item.title, domain: item.domain, priceCents: item.priceCents, reason: String(reason || '').trim().slice(0, 200) }, m.id)
     save()
     return { planned: clone(m.expenseProducts) }
   },
+  // either side before signing (the signatures reset); after, the freelancer any open item and the client only
+  // one still proposed; never one a claim bought
   async unplanProduct(milestoneId, productId) {
     await latency()
     const { c, m } = findMilestone(milestoneId)
     const role = assertParty(c)
-    const p = (m.expenseProducts || []).find((x) => x.id === productId)
-    if (!p) throw new Error('Not a planned purchase')
-    m.expenseProducts = m.expenseProducts.filter((x) => x.id !== productId)
-    log(c, role, 'expense.product_unplanned', { title: p.title, domain: p.domain }, m.id)
+    if (['released', 'refunded'].includes(m.status)) refuse('settled')
+    const item = listItem(m, productId)
+    if (!item) refuse('not_on_list')
+    const signed = signedBoth(c)
+    const verdict = canRemove(item, { role, signedBoth: signed, lifecycle: itemLifecycle(item, m.expenses || []) })
+    if (!verdict.ok) refuse(verdict.code, { freelancerName: firstName(c.freelancer?.name || '') })
+    m.expenseProducts = m.expenseProducts.filter((x) => x.id !== item.id)
+    const reset = signed ? false : resetSignatures(c)
+    log(c, role, 'expense.product_unplanned', { productId: item.id, title: item.title, domain: item.domain, priceCents: item.priceCents }, m.id)
     save()
-    return { planned: clone(m.expenseProducts) }
+    return { planned: clone(m.expenseProducts), resetSignatures: reset }
   },
   async claimExpense(milestoneId, { amountCents, merchant, purpose, receipt }) {
     await latency()
@@ -1544,14 +1778,15 @@ export const demo = {
     }
     if (!receipt.sample && receipt.file) receiptFiles.set(e.id, receipt.file)
     m.expenses.push(e)
-    log(c, 'freelancer', 'expense.claimed', { expenseId: e.id, amountCents, merchant: e.merchant }, m.id)
+    log(c, 'freelancer', 'expense.claimed', { expenseId: e.id, amountCents, merchant: e.merchant, viaAgent: false }, m.id)
     save()
     await wait(RECEIPTS[receipt.sample]?.via === 'ocr' ? 1600 : 900)
-    const { checks, tokens, via } = demoExpenseChecks(c, m, e, receipt.sample)
-    const outcome = checks.some((x) => x.status === 'fail') ? 'rejected' : checks.every((x) => x.status === 'pass') ? 'approved' : 'needs_client'
+    const { checks, tokens, via, planned } = demoExpenseChecks(c, m, e, receipt.sample)
+    const outcome = decide(checks)
     const by = checks.some((x) => x.by === 'claude' && x.status !== 'unknown') ? 'claude' : 'rules'
-    Object.assign(e, { checks, tokens, extracted: { via }, status: outcome === 'approved' ? 'checking' : outcome, ...(outcome === 'rejected' ? { decidedBy: by, decidedAt: now() } : {}) })
-    log(c, 'agent', 'expense.checked', { expenseId: e.id, outcome, amountCents, merchant: e.merchant, failed: checks.filter((x) => x.status === 'fail').length, by, tokens }, m.id)
+    // planned: the list items this receipt bought (each is reimbursed once)
+    Object.assign(e, { checks, tokens, extracted: { via, planned }, status: outcome === 'approved' ? 'checking' : outcome, ...(outcome === 'rejected' ? { decidedBy: by, decidedAt: now() } : {}) })
+    log(c, 'agent', 'expense.checked', { expenseId: e.id, outcome, amountCents, merchant: e.merchant, failed: checks.filter((x) => x.status === 'fail').length, by, tokens, planned: planned.map((p) => p.title) }, m.id)
     if (outcome === 'approved') reimburseDemo(c, m, e, by)
     save()
     return { status: e.status }
@@ -1571,7 +1806,7 @@ export const demo = {
     if (assertParty(c) !== 'client') throw new Error('Only the client decides a claim.')
     if (!['needs_client', 'error'].includes(e.status)) throw new Error('This claim is already settled')
     Object.assign(e, { status: 'declined', decidedBy: 'client', decidedAt: now(), note: reason })
-    log(c, 'client', 'expense.declined', { expenseId: id, amountCents: e.amountCents, merchant: e.merchant }, m.id)
+    log(c, 'client', 'expense.declined', { expenseId: id, amountCents: e.amountCents, merchant: e.merchant, reason }, m.id)
     save()
     return { status: 'declined' }
   },
@@ -1582,9 +1817,11 @@ export const demo = {
     if (file) return { url: URL.createObjectURL(file), name: e.receiptName, type: e.receiptType }
     const r = RECEIPTS[e.sample] || { merchant: e.merchant, lines: ['(demo mode keeps uploaded files only in the tab that sent them)'] }
     const esc = (x) => String(x).replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[ch])
-    const rows = [r.merchant || 'Receipt', 'Receipt', r.ref ? `Order #${r.ref}` : '', `Date: ${e.createdAt.slice(0, 10)}`, '', ...r.lines, '', 'Paid with PayPal']
+    // labelled as a drawing first, then the merchant as plain text: no logos, no brand colours
+    const rows = [RECEIPTS[e.sample] ? 'Sample receipt · demo mode' : 'Demo mode', r.merchant || 'Receipt', 'Receipt', r.ref ? `Order #${r.ref}` : '', `Date: ${e.createdAt.slice(0, 10)}`, '', ...r.lines, '', 'Paid with PayPal']
     const ink = e.sample === 'blurry' ? '#b8b8b8' : '#111'
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="460" height="${70 + rows.length * 26}"><rect width="100%" height="100%" fill="#fff"/>${rows.map((t, i) => `<text x="28" y="${44 + i * 26}" fill="${ink}" font-family="Arial" font-size="${i === 0 ? 20 : 15}">${esc(t)}</text>`).join('')}</svg>`
+    const style = (i) => (i === 0 ? 'fill="#6b7280" font-size="13"' : `fill="${ink}" font-size="${i === 1 ? 20 : 15}"`)
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="460" height="${70 + rows.length * 26}"><rect width="100%" height="100%" fill="#fff"/>${rows.map((t, i) => `<text x="28" y="${44 + i * 26}" ${style(i)} font-family="Arial">${esc(t)}</text>`).join('')}</svg>`
     return { url: URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' })), name: e.receiptName, type: 'image/svg+xml' }
   },
   async retryExpensePayout() {
@@ -1861,24 +2098,25 @@ export const demo = {
     m1.fundedAt = t(8); m1.releasedAt = t(5); m1.authorizedAt = t(8); m1.paidOutAt = t(4.99)
     m1.paypal = { orderId: 'DEMO-ORD-7H2K9P', authorizationId: 'DEMO-AUTH-Q8M3XZ', captureId: 'DEMO-CAP-5TR1WA', payoutBatchId: 'DEMO-PAYOUT-8XQ2LM', payoutItemId: 'DEMO-ITEM-K4P9TA' }
     Object.assign(m1, { releasedCents: 120000, voidedCents: 0, ...((s) => ({ feeCents: s.fee, payoutCents: s.net }))(split(120000)), payoutEmail: 'sam@okafor.studio', payoutStatus: 'SUCCESS' })
-    const s1 = { id: uid('s'), attempt: 1, liveUrl: 'https://northbrew-landing.vercel.app', repoUrl: 'https://github.com/okafor-studio/northbrew-landing', notes: '', createdAt: t(5.2) }
-    const r1 = verdictFor(m1, s1)
-    const engineOf = (rs, ms) => ({
+    // the deliveries are the sample pages Verdikt serves, so each verdict plays its real Kernel recording
+    const s1 = { id: uid('s'), attempt: 1, liveUrl: `${location.origin}/samples/northbrew.html`, repoUrl: 'https://github.com/okafor-studio/northbrew-landing', notes: '', createdAt: t(5.2) }
+    const r1 = verdictFor(c, m1, s1)
+    const engineOf = (rs, ms, m, sub) => ({
       version: 'probes-1', decided: { probe: rs.filter((r) => r.layer === 'probe').length, ocr: 0, model: rs.filter((r) => r.layer === 'model').length, reused: 0 },
-      tokens: tokensFor(rs.filter((r) => r.layer === 'model').length), ms: { total: ms }, receipt: fakeHash(),
+      tokens: tokensFor(rs.filter((r) => r.layer === 'model').length), ms: { total: ms }, receipt: demoReceipt(m, sub, rs),
       probes: { run: rs.reduce((s, r) => s + r.probes.length, 0), passed: rs.reduce((s, r) => s + r.probes.filter((p) => p.status === 'pass').length, 0), failed: rs.reduce((s, r) => s + r.probes.filter((p) => p.status === 'fail').length, 0) },
     })
-    s1.verdict = { id: uid('v'), outcome: 'pass', confidence: 0.97, createdAt: t(5.1), summary: demoSummary(r1, m1.criteria, false), results: r1, replay: SAMPLE_REPLAY, engine: engineOf(r1, 19400) }
+    s1.verdict = { id: uid('v'), outcome: 'pass', confidence: 0.97, createdAt: t(5.1), summary: demoSummary(r1, m1.criteria, false), results: r1, ...recordingOf(s1), precedent: precedentReportOf(r1), engine: engineOf(r1, 19400, m1, s1) }
     m1.submissions = [s1]
     m2.fundedAt = t(4); m2.authorizedAt = t(4); m2.holdExpiresAt = new Date(Date.now() + 25 * 864e5).toISOString()
     m2.reauthorizedAt = t(1)   // the honor period ended, so Verdikt renewed the hold, as the server's renewHolds does
     m2.paypal = { orderId: 'DEMO-ORD-3PL0VX', authorizationId: 'DEMO-AUTH-9KD2RE' }
-    const s2 = { id: uid('s'), attempt: 1, liveUrl: 'https://northbrew-shop-v1.vercel.app', repoUrl: 'https://github.com/okafor-studio/northbrew-shop', notes: 'First pass of the shop.', createdAt: t(0.3) }
+    const s2 = { id: uid('s'), attempt: 1, liveUrl: `${location.origin}/samples/northbrew-shop-v1.html`, repoUrl: 'https://github.com/okafor-studio/northbrew-shop', notes: 'First pass of the shop.', createdAt: t(0.3) }
     s2.verdict = null
     m2.submissions = [s2]
-    const results = verdictFor(m2, s2)
+    const results = verdictFor(c, m2, s2)
     const failed = results.filter((r) => !r.passed).length
-    s2.verdict = { id: uid('v'), outcome: 'fail', confidence: 0.96, createdAt: t(0.28), summary: demoSummary(results, m2.criteria, false), results, replay: SAMPLE_REPLAY, engine: engineOf(results, 16800) }
+    s2.verdict = { id: uid('v'), outcome: 'fail', confidence: 0.96, createdAt: t(0.28), summary: demoSummary(results, m2.criteria, false), results, ...recordingOf(s2), precedent: precedentReportOf(results), engine: engineOf(results, 16800, m2, s2) }
     // Sam's coding agent pre-checked over MCP before delivering, then asked why the layout check fails
     const pre = precheckFor(m2, s2)
     const firstFail = pre.checks.find((x) => x.status === 'fail')
@@ -1889,30 +2127,37 @@ export const demo = {
         { id: uid('t'), author: 'verifier', viaAgent: false, kind: 'answer', createdAt: t(0.329), body: `“${firstFail.statement}” is measured by a deterministic probe: ${firstFail.observed} It will fail the same way until the page changes — no model judges it.`, data: { checks: [firstFail.id], nextSteps: [firstFail.fix || 'Fix it and pre-check again.', 'Pre-check the new build before resubmitting.'] } },
       ] : []),
     ]
-    // M2 carries an expense budget in the same hold; Sam already claimed the shop's hosting and was reimbursed
-    Object.assign(m2, { expenseBudgetCents: 12000, expenseCovers: ['Domain', 'Hosting', 'Fonts'] })
+    // M2 carries an expense budget in the same hold, with a shopping list of saved Channel3 listings: Maya pinned
+    // the Netum scanner before both signed, and Sam's agent proposed the Anself printer after (it waits for Maya).
+    // Sam already claimed the shop's hosting and was reimbursed. Room left for the list: $250 − $20 − $62.89.
+    Object.assign(m2, { ...SAMPLE_BUDGET, expenseProducts: sampleShoppingList(t) })
+    const [netum, anself] = m2.expenseProducts
     const host = { id: uid('x'), amountCents: 2000, merchant: 'Stackhost', purpose: 'Hosting for the shop', receiptName: 'stackhost-invoice.pdf', receiptType: 'application/pdf', sample: 'hosting', viaAgent: true, createdAt: t(2) }
-    Object.assign(host, demoExpenseChecks(c, { ...m2, expenses: [] }, host, 'hosting'))
-    host.extracted = { via: host.via }
-    delete host.via
+    const hostCheck = demoExpenseChecks(c, { ...m2, expenses: [] }, host, 'hosting')
+    Object.assign(host, { checks: hostCheck.checks, tokens: hostCheck.tokens, extracted: { via: hostCheck.via, planned: hostCheck.planned } })
     Object.assign(host, {
       status: 'approved', decidedBy: 'rules', decidedAt: t(1.999), note: '', captureId: 'DEMO-CAP-7XH2QD',
       payoutStatus: 'SUCCESS', payoutEmail: 'sam@okafor.studio', paidOutAt: t(1.998),
     })
     m2.expenses = [host]
     c.milestones = [m1, m2, m3]
+    const recorded = (s, milestoneId, at) => (sampleOf(s) ? [{ id: uid('a'), actor: 'agent', event: 'verify.recorded', payload: recordedRow(sampleOf(s)), milestoneId, createdAt: at }] : [])
     c.activity = [
       { id: uid('a'), actor: 'agent', event: 'verify.failed', payload: { failed, total: results.length }, milestoneId: m2.id, createdAt: t(0.28) },
+      ...recorded(s2, m2.id, t(0.2801)),
       { id: uid('a'), actor: 'freelancer', event: 'work.submitted', payload: { attempt: 1 }, milestoneId: m2.id, createdAt: t(0.3) },
+      { id: uid('a'), actor: 'freelancer', event: 'expense.product_planned', payload: { productId: anself.id, title: anself.title, brand: anself.brand, domain: anself.domain, priceCents: anself.priceCents, status: 'proposed', viaAgent: true, resetSignatures: false }, milestoneId: m2.id, createdAt: anself.at },
       { id: uid('a'), actor: 'paypal', event: 'payout.completed', payload: { amountCents: 2000, email: 'sam@okafor.studio', expenseId: host.id }, milestoneId: m2.id, createdAt: t(1.998) },
       { id: uid('a'), actor: 'paypal', event: 'expense.reimbursed', payload: { expenseId: host.id, amountCents: 2000, merchant: 'Stackhost', captureId: host.captureId, by: 'rules' }, milestoneId: m2.id, createdAt: t(1.999) },
-      { id: uid('a'), actor: 'agent', event: 'expense.checked', payload: { expenseId: host.id, outcome: 'approved', amountCents: 2000, merchant: 'Stackhost', failed: 0, by: 'rules', tokens: 0 }, milestoneId: m2.id, createdAt: t(1.9995) },
+      { id: uid('a'), actor: 'agent', event: 'expense.checked', payload: { expenseId: host.id, outcome: 'approved', amountCents: 2000, merchant: 'Stackhost', failed: 0, by: 'rules', tokens: 0, planned: [] }, milestoneId: m2.id, createdAt: t(1.9995) },
       { id: uid('a'), actor: 'freelancer', event: 'expense.claimed', payload: { expenseId: host.id, amountCents: 2000, merchant: 'Stackhost', viaAgent: true }, milestoneId: m2.id, createdAt: t(2) },
-      { id: uid('a'), actor: 'paypal', event: 'escrow.funds_held', payload: { amountCents: 192000, expenseBudgetCents: 12000 }, milestoneId: m2.id, createdAt: t(4) },
+      { id: uid('a'), actor: 'paypal', event: 'escrow.funds_held', payload: { amountCents: 205000, expenseBudgetCents: 25000 }, milestoneId: m2.id, createdAt: t(4) },
       { id: uid('a'), actor: 'paypal', event: 'escrow.released', payload: { amountCents: 120000, captureId: m1.paypal.captureId, by: 'agent' }, milestoneId: m1.id, createdAt: t(5) },
       { id: uid('a'), actor: 'agent', event: 'verify.passed', payload: { failed: 0, total: m1.criteria.length }, milestoneId: m1.id, createdAt: t(5.1) },
+      ...recorded(s1, m1.id, t(5.1001)),
       { id: uid('a'), actor: 'paypal', event: 'escrow.funds_held', payload: { amountCents: 120000 }, milestoneId: m1.id, createdAt: t(8) },
       { id: uid('a'), actor: 'system', event: 'contract.active', payload: {}, createdAt: t(8.4) },
+      { id: uid('a'), actor: 'client', event: 'expense.product_planned', payload: { productId: netum.id, title: netum.title, brand: netum.brand, domain: netum.domain, priceCents: netum.priceCents, status: 'terms', viaAgent: false, resetSignatures: false }, milestoneId: m2.id, createdAt: netum.at },
       { id: uid('a'), actor: 'agent', event: 'terms.drafted', payload: {}, createdAt: t(8.9) },
       { id: uid('a'), actor: 'client', event: 'contract.created', payload: { milestones: 3 }, createdAt: t(9) },
     ]

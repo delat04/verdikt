@@ -3,7 +3,7 @@ import { demo } from './demo'
 import { live } from './live'
 
 /* Live when Supabase is configured; otherwise the in-browser demo. A visitor can also choose the demo
-   on a live deployment ("Try it now", or a link with ?demo) — remembered in this browser — so anyone
+   on a live deployment ("Try the demo", or a link with ?demo) — remembered in this browser — so anyone
    can play the whole flow without an account, and go back to real accounts from the demo menu. */
 const MODE_KEY = 'verdikt-mode'
 const chosen = (() => {

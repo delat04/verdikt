@@ -33,12 +33,39 @@ services:
       # optional: Kernel records each official verification as video; Elastic keeps verdict precedent
       - key: KERNEL_API_KEY
         sync: false
+      # most Kernel sessions at once; above it a check waits up to a minute, then runs locally
+      - key: KERNEL_MAX_BROWSERS
+        value: "3"
       - key: ELASTIC_URL
         sync: false
       - key: ELASTIC_API_KEY
         sync: false
+      # precedent: the alias (made by `npm run precedent:sync -- --rebuild --yes`), the pinned models, the
+      # reranker floor, the most a verdict waits for it (ms), the kill switch, and the same-parties exclusion
+      - key: ELASTIC_INDEX
+        value: verdikt-precedent
+      - key: ELASTIC_EMBED
+        value: .jina-embeddings-v5-text-small
+      - key: ELASTIC_RERANKER
+        value: .jina-reranker-v3
+      - key: ELASTIC_PRECEDENT_MIN
+        value: "0.22"
+      - key: ELASTIC_PRECEDENT_BUDGET_MS
+        value: "4000"
+      - key: ELASTIC_PRECEDENT
+        value: "on"
+      - key: ELASTIC_PRECEDENT_EXCLUDE_PARTIES
+        value: "off"
       - key: CHANNEL3_API_KEY
         sync: false
+      # Channel3's REST API and its MCP server (the fallback, and the search with no key)
+      - key: CHANNEL3_API_URL
+        value: https://api.trychannel3.com
+      - key: CHANNEL3_MCP_URL
+        value: https://mcp.trychannel3.com/
+      # Channel3 searches a month before Verdikt stops itself (of the 1,000 free credits)
+      - key: CHANNEL3_MONTHLY_CAP
+        value: "900"
       - key: PLATFORM_FEE_PERCENT
         value: "2"
       # read at build time — public, they ship to the browser

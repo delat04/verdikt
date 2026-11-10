@@ -23,7 +23,7 @@ export const SAMPLE_PRODUCTS = {
   },
   {
    "id": "7kkbfEK",
-   "title": "Zebra DS9308-SR - 1D/2D - Handsfree Presentation Scanner - DS9308-SR4U2100AZW - Barcode Scanners - CDW.com",
+   "title": "Zebra DS9308-SR Handsfree Presentation Scanner",
    "brand": "Zebra",
    "image": "https://cdn.trychannel3.com/cleaned/v1/22b71b3e-74c4-49ee-9c6e-366d321d393f?aid=01M6Z9XHB2TAXFKAKETPX5TDG4&mid=ZQQu",
    "priceCents": 13999,

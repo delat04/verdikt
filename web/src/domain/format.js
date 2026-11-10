@@ -40,6 +40,15 @@ export function firstName(name = '') {
   return name.trim().split(/\s+/)[0] || name
 }
 
+// a second in a recording, 'm:ss': the shared copy (domain/replay.js), so the report and the server agree
+export { clock } from './replay'
+
+/** A file's size as people read it: 391631 → '0.4 MB'. */
+export function mb(bytes) {
+  const n = Number(bytes) || 0
+  return `${(n / 1048576).toFixed(n >= 10 * 1048576 ? 0 : 1)} MB`
+}
+
 export function hostOf(url = '') {
   try { return new URL(url).host } catch { return url }
 }

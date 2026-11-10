@@ -14,6 +14,8 @@ import { z } from 'zod'
 import { db, userFromRequest } from '../lib/supabase.js'
 import { config } from '../config.js'
 import { money } from '../lib/money.js'
+import { verdictView } from '../agent/verdictView.js'
+import { listError, receiptBand } from '../agent/expenseRules.js'
 
 const INSTRUCTIONS = `Verdikt is AI-verified escrow on PayPal for freelance software work.
 A contract is agreed in a contract room (a neutral AI mediator keeps a versioned terms sheet), locked into
@@ -43,12 +45,27 @@ Either way the money is held, not paid: PayPal captures it only when the signed 
 share of the limit, and whatever the limit never spends is voided, never charged. You can't create or raise a limit.
 Freelancer (coding) agent: get_checks → build → precheck_delivery (free dry run; repeat until nothing fails) →
 ask_verifier if a check is unclear → submit_delivery → wait_for_verdict → if a check fails, fix it and submit again.
+When Kernel is available, official checks run in its cloud browser and are recorded: wait_for_verdict returns the
+video, its sha-256, and seen_at on each failed check — the second in the video where the verifier measured it. When Kernel was busy or
+didn't start, or the recording wasn't saved, recording.unavailable says why instead; a server without Kernel checks
+locally and returns no recording. The evidence and the verdict are the same either way.
 
 Expenses: a milestone may carry an expense budget (set_expense_budget, before signing) held in the same PayPal hold.
 The freelancer's agent buys what the project needs (a domain, hosting…) and calls claim_expense with the receipt:
 deterministic checks read it and, when they all pass, PayPal reimburses it at once — the budget is the limit the
 client already agreed to. get_expenses shows what's left. Unused budget goes back to the client when the milestone settles.
+Shopping list: for physical things the work needs (a barcode scanner, a label printer), plan_budget_purchase searches real
+store listings (Channel3) within what's left and adds one to the milestone's shopping list. Before signing, the list is
+part of the terms. After signing, the client's additions count at once and the freelancer's are proposals the client
+agrees to (agree_product_id). Buy the listed product from a store that sells it, then claim_expense: a receipt that
+names it, at about the listed price, is reimbursed by rules with no model and no wait. Anything else is checked against
+the budget lines.
 Never invent amounts: ask your person for budget and dates.`
+
+// what signing shares (precedent, lib/precedent.js): the web app's sign modal says the same
+const SHARING = 'Each check and how it was decided is shared, anonymised (this contract’s names, links, quotes and amounts removed), with the verifier on other Verdikt contracts, so similar work gets similar verdicts.'
+// store links (Channel3): the web app's search footer discloses the same
+const DISCLOSURE = 'Links go through Channel3 and stores may pay it a commission; Verdikt charges no fee on expenses.'
 
 const json = (data) => ({ content: [{ type: 'text', text: JSON.stringify(data, null, 1) }] })
 const fail = (e) => ({ isError: true, content: [{ type: 'text', text: e.message || String(e) }] })
@@ -151,9 +168,13 @@ function buildServer(app, auth, user) {
     limitCents: limit_usd ? Math.round(limit_usd * 100) : null, deadlineDays: deadline_days ?? null, mustHaves: must_haves || [], autoAccept: auto_accept,
   }))
 
-  tool('sign_terms', 'Sign the locked terms (every milestone and its checks). When both have signed, the first milestone can be funded.', {
+  tool('sign_terms', `Sign the locked terms (every milestone and its checks). When both have signed, the first milestone can be funded. Tell your person before signing: ${SHARING}`, {
     contract_id: z.string(),
-  }, async ({ contract_id }) => api('POST', `/contracts/${contract_id}/sign`))
+  }, async ({ contract_id }) => {
+    const res = await api('POST', `/contracts/${contract_id}/sign`)
+    // the web app's sign modal says it; an agent signing says it to its person
+    return res && typeof res === 'object' && !Array.isArray(res) ? { ...res, sharing: SHARING } : { result: res, sharing: SHARING }
+  })
 
   tool('get_spending_limit', 'Client side: the spending limit your person approved for you (one PayPal hold): how much is left, the most for any one job, when it ends, what it is for, and every job it is holding or has paid for. null when there is none — then each hold needs your person’s approval on PayPal.', {}, async () => {
     const { current } = await api('GET', '/spend-limits')
@@ -242,7 +263,7 @@ function buildServer(app, auth, user) {
     milestone_id: z.string(), question: z.string(),
   }, async ({ milestone_id, question }) => api('POST', `/milestones/${milestone_id}/verifier/ask`, { question }))
 
-  tool('submit_delivery', 'Freelancer only: deliver a funded milestone. The verifier opens the live URL at desktop and mobile size, reads the public repo and runs every signed check; then call wait_for_verdict.', {
+  tool('submit_delivery', 'Freelancer only: deliver a funded milestone. The verifier opens the live URL at desktop and mobile size, reads the public repo and runs every signed check; then call wait_for_verdict. When Kernel is available the run is recorded in its cloud browser; otherwise the verdict says why there is no video.', {
     milestone_id: z.string(), live_url: z.string().url(), repo_url: z.string().url(), notes: z.string().optional(),
   }, async ({ milestone_id, live_url, repo_url, notes }) => {
     const r = await api('POST', `/milestones/${milestone_id}/submit`, { liveUrl: live_url, repoUrl: repo_url, notes: notes || '' })
@@ -320,18 +341,81 @@ function buildServer(app, auth, user) {
     skills: z.string().describe('What you do: stack, kind of work, e.g. "Vue and Supabase web apps, landing pages"'),
   }, async ({ skills }) => api('POST', '/opportunities/scout', { skills }), { readOnlyHint: true })
 
-  tool('plan_budget_purchase', 'Either side, once a milestone has an expense budget: search live listings from thousands of stores (Channel3) for something the work needs to buy, in stock and within what is left of the budget. Pass plan_product_id (from a search result) to pin it as a planned purchase: a receipt from that store at about the listed price is then reimbursed without waiting for the client; anything off the plan waits for them. Links are Channel3 buy links.', {
-    milestone_id: z.string(), query: z.string().optional(), plan_product_id: z.string().optional(),
-  }, async ({ milestone_id, query, plan_product_id }) => {
-    if (plan_product_id) {
-      const r = await api('POST', `/milestones/${milestone_id}/expenses/plan`, { productId: plan_product_id })
-      return { planned: r.planned.map((p) => ({ product_id: p.id, title: p.title, listed: money(p.priceCents), store: p.domain, url: p.url })) }
+  // the shopping list: one tool for search, add, remove, agree and decline. Every action runs through the same
+  // routes as the app (routes/expenses.js), and the list it returns is GET /expenses' planned view, so an agent
+  // reads each item's consent and what reimburses it at once exactly as the server decides them.
+  const listSide = async (milestoneId) => {
+    const { data: m } = await db().from('milestones')
+      .select('contract:contracts(client_id, freelancer_id, client_signed_at, freelancer_signed_at)').eq('id', milestoneId).maybeSingle()
+    const c = m?.contract
+    if (!c || ![c.client_id, c.freelancer_id].includes(user.id)) throw new Error('Milestone not found')
+    return { role: roleIn(c), signed: !!(c.client_signed_at && c.freelancer_signed_at) }
+  }
+  const BUY_NEXT = 'buy it from a store that sells it and claim_expense with the receipt'
+  tool('plan_budget_purchase', `Either side, once a milestone has an expense budget: search real store listings (Channel3) for a physical item the work needs, within the room left in the budget, and manage the milestone's shopping list. Before signing the list is part of the terms (changing it resets both signatures). After signing, a client's addition counts at once; a freelancer's is a proposal the client agrees to or declines. A receipt that names a listed item, from a store that sells it, at about the listed price, is reimbursed by rules at once. ${DISCLOSURE} With no action it searches; pass at most one of add_product_id, remove_product_id, agree_product_id or decline_product_id.`, {
+    milestone_id: z.string(),
+    query: z.string().optional().describe('What to search for, 3 to 120 characters, e.g. "2D barcode scanner"'),
+    add_product_id: z.string().optional().describe('A product_id from a search: add it to the shopping list'),
+    plan_product_id: z.string().optional().describe('Older name for add_product_id'),
+    remove_product_id: z.string().optional().describe('Take an item off the list (not one a claim already bought)'),
+    agree_product_id: z.string().optional().describe('Client, after signing: agree to an item the freelancer proposed'),
+    decline_product_id: z.string().optional().describe('Client, after signing: decline a proposed item; it leaves the list'),
+    reason: z.string().max(200).optional().describe('With decline_product_id: why, shown to the freelancer'),
+  }, async ({ milestone_id, query, add_product_id, plan_product_id, remove_product_id, agree_product_id, decline_product_id, reason }) => {
+    const add = add_product_id || plan_product_id
+    const actions = [['add', add], ['remove', remove_product_id], ['agree', agree_product_id], ['decline', decline_product_id]].filter(([, id]) => id)
+    if (actions.length > 1) throw new Error('One list action at a time: add_product_id, remove_product_id, agree_product_id or decline_product_id.')
+    const side = await listSide(milestone_id)
+
+    if (!actions.length) {
+      const r = await api('POST', `/milestones/${milestone_id}/expenses/products`, { query: query || '' })
+      const adds = !side.signed
+        ? 'Pass add_product_id to add one: before signing it becomes part of the terms, and any signature resets.'
+        : side.role === 'client'
+          ? 'Pass add_product_id to add one: on a signed contract the client’s additions count at once.'
+          : 'Pass add_product_id to propose one: on a signed contract the client agrees to it (or declines) before it counts.'
+      return {
+        room_left: money(r.capCents, 'USD'),
+        products: r.products.map((p) => ({
+          product_id: p.id, title: p.title, brand: p.brand || undefined, price: money(p.priceCents, 'USD'),
+          was: p.compareAtCents ? money(p.compareAtCents, 'USD') : undefined,
+          store: p.domain, other_stores: receiptBand(p).stores.filter((d) => d !== p.domain),
+          in_stock: true, url: p.url,
+        })),
+        as_of: r.asOf, reused: !!r.cached, disclosure: DISCLOSURE,
+        next: r.products.length ? `${adds} Then ${BUY_NEXT}.` : 'Nothing in stock within the room left. Try other words.',
+      }
     }
-    const r = await api('POST', `/milestones/${milestone_id}/expenses/products`, { query: query || '' })
+
+    const [[action, id]] = actions
+    // the server refuses these too, but only after finding the item: say the rule first
+    if (['agree', 'decline'].includes(action) && side.role !== 'client') throw new Error(listError('client_only').error)
+    const at = `/milestones/${milestone_id}/expenses/plan`
+    const pid = encodeURIComponent(id)
+    const r = action === 'add' ? await api('POST', at, { productId: id })
+      : action === 'remove' ? await api('DELETE', `${at}/${pid}`)
+        : action === 'agree' ? await api('POST', `${at}/${pid}/agree`)
+          : await api('POST', `${at}/${pid}/decline`, { reason: reason || '' })
+    const view = await api('GET', `/milestones/${milestone_id}/expenses`)
+    const reset = !!r.resetSignatures
+    const signAgain = reset ? ' Both signatures were reset: both sides sign again (sign_terms).' : ''
+    let next
+    if (action === 'add') {
+      next = r.unchanged ? 'Already on the shopping list.'
+        : r.item?.status === 'proposed' ? 'Proposed: the client agrees to it (agree_product_id) or declines it. Until then a receipt for it is checked against the budget lines.'
+          : r.item?.status === 'agreed' ? `On the signed list at once: ${BUY_NEXT}.`
+            : `On the shopping list as part of the terms.${signAgain || ' Signing agrees to it.'}`
+    } else if (action === 'agree') next = `Agreed: the freelancer can ${BUY_NEXT}; a receipt that names it is reimbursed by rules at once.`
+    else if (action === 'decline') next = 'Declined: it is off the list.'
+    else next = `Taken off the list.${signAgain}`
     return {
-      left_in_budget: money(r.leftCents),
-      products: r.products.map((p) => ({ product_id: p.id, title: p.title, brand: p.brand || undefined, price: money(p.priceCents), store: p.domain, url: p.url })),
-      next: r.products.length ? 'Pass plan_product_id to pin the one to buy, then buy it from that store and claim_expense with the receipt.' : 'Nothing in stock within the budget — try other words.',
+      shopping_list: (view.planned || []).map((p) => ({
+        product_id: p.product_id, title: p.title, store: p.store, listed: p.listed, status: p.status,
+        bought: p.bought, reimbursed_at_once_if: p.reimbursed_at_once_if,
+      })),
+      room_left: view.room_left,
+      ...(reset ? { signatures_reset: true } : {}),
+      next,
     }
   })
 
@@ -344,11 +428,11 @@ function buildServer(app, auth, user) {
     return { ok: true, next: 'Both sides sign the terms again (sign_terms).' }
   })
 
-  tool('get_expenses', 'A milestone’s expense budget: what it covers, what’s spent, waiting and left, and every claim with its checks and PayPal capture.', {
+  tool('get_expenses', 'A milestone’s expense budget: what it covers, what’s spent, waiting and left, every claim with its checks and PayPal capture, and the shopping list: each item’s status (on the terms, proposed, agreed), whether a claim bought it, what receipt is reimbursed at once, and room_left for more.', {
     milestone_id: z.string(),
   }, async ({ milestone_id }) => api('GET', `/milestones/${milestone_id}/expenses`), { readOnlyHint: true })
 
-  tool('claim_expense', 'Freelancer only: claim a project expense from the milestone’s budget with its receipt (PDF, PNG, JPG or WebP, base64, up to 5 MB). Deterministic checks read the receipt — amount on it, fits the budget, dated during the contract, not claimed before, something the budget covers. All pass → PayPal captures that amount from the hold and pays it to the freelancer at once, no fee. One fails → rejected with the reason and the fix. Unreadable → the client decides.', {
+  tool('claim_expense', 'Freelancer only: claim a project expense from the milestone’s budget with its receipt (PDF, PNG, JPG or WebP, base64, up to 5 MB). Deterministic checks read the receipt — amount on it, fits the budget, dated during the contract, not claimed before, something the budget covers. All pass → PayPal captures that amount from the hold and pays it to the freelancer at once, no fee. One fails → rejected with the reason and the fix. Unreadable → the client decides. A receipt that names an item on the milestone’s shopping list (plan_budget_purchase), from a store that sells it, at about the listed price, is reimbursed by rules with no model.', {
     milestone_id: z.string(),
     amount_usd: z.number().positive().describe('Exactly what the receipt shows (or one line of it)'),
     merchant: z.string().describe('Who was paid'),
@@ -364,7 +448,9 @@ function buildServer(app, auth, user) {
     return {
       ...r,
       next: {
-        approved: 'Reimbursed: PayPal captured it from the hold and the payout is on its way.',
+        approved: (r.checks || []).some((c) => c.check === 'The item on the list' && c.status === 'pass')
+          ? 'Reimbursed by rules: the receipt names an item on the shopping list. PayPal captured it from the hold and the payout is on its way.'
+          : 'Reimbursed: PayPal captured it from the hold and the payout is on its way.',
         rejected: 'Not reimbursed — see the failed check and its fix. A corrected claim can be sent again.',
         needs_client: 'The checks could not settle it; the client approves or declines it in Verdikt.',
         error: 'The checks passed but PayPal did not capture it; the client can retry from Verdikt.',
@@ -373,16 +459,13 @@ function buildServer(app, auth, user) {
   })
 
   tool('get_verdict', 'The latest verdict on a milestone: pass/fail, and for each check whether it was met and why.', { milestone_id: z.string() }, async ({ milestone_id }) => {
-    const { data: m } = await db().from('milestones').select('id, title, status, contract_id, criteria(id, statement), submissions(attempt, live_url, verdicts(outcome, summary, created_at, criterion_results(criterion_id, passed, explanation)))').eq('id', milestone_id).maybeSingle()
+    const { data: m } = await db().from('milestones').select('id, title, status, contract_id, criteria(id, statement, position), submissions(attempt, live_url, verdicts(outcome, summary, created_at, report, criterion_results(criterion_id, passed, explanation, evidence)))').eq('id', milestone_id).maybeSingle()
     if (!m) throw new Error('Milestone not found')
     await mine(m.contract_id)
     const sub = [...m.submissions].sort((a, b) => b.attempt - a.attempt)[0]
     const v = [...(sub?.verdicts || [])].sort((a, b) => b.created_at.localeCompare(a.created_at))[0]
     if (!v) return { status: m.status, verdict: null }
-    return {
-      status: m.status, outcome: v.outcome, summary: v.summary,
-      checks: m.criteria.map((c) => { const r = v.criterion_results.find((x) => x.criterion_id === c.id); return { check: c.statement, met: r?.passed ?? null, why: r?.explanation || '' } }),
-    }
+    return verdictView(m, v)
   }, { readOnlyHint: true })
 
   tool('wait_for_verdict', 'Wait (up to ~50 s per call) until the verifier finishes a milestone, then return the verdict, what decided each check, and the money that moved through PayPal. Call again if it is still checking.', {
@@ -390,7 +473,7 @@ function buildServer(app, auth, user) {
   }, async ({ milestone_id, timeout_seconds }) => {
     const until = Date.now() + timeout_seconds * 1000
     for (;;) {
-      const { data: m } = await db().from('milestones').select('id, title, status, contract_id, progress, amount_cents, released_cents, tranches, criteria(id, statement, position), submissions(attempt, verdicts(outcome, summary, created_at, report, criterion_results(criterion_id, passed, layer, explanation)))').eq('id', milestone_id).maybeSingle()
+      const { data: m } = await db().from('milestones').select('id, title, status, contract_id, progress, amount_cents, released_cents, tranches, criteria(id, statement, position), submissions(attempt, verdicts(outcome, summary, created_at, report, criterion_results(criterion_id, passed, layer, explanation, evidence)))').eq('id', milestone_id).maybeSingle()
       if (!m) throw new Error('Milestone not found')
       await mine(m.contract_id)
       if (!['submitted', 'verifying'].includes(m.status) || Date.now() > until) {
@@ -401,17 +484,7 @@ function buildServer(app, auth, user) {
           return { status: m.status, still_checking: true, stage: m.progress?.['@']?.stage || null, decided_so_far: `${done} of ${m.criteria.length}`, next: 'Call wait_for_verdict again.' }
         }
         if (!v) return { status: m.status, verdict: null }
-        const e = v.report?.engine
-        return {
-          status: m.status, outcome: v.outcome, summary: v.summary,
-          engine: e ? { decided: e.decided, model_tokens: (e.tokens?.input || 0) + (e.tokens?.output || 0), took_ms: e.ms?.total, receipt: e.receipt } : undefined,
-          ...(v.report?.replay?.url ? { replay_video: v.report.replay.url } : {}),
-          money: { held: money(m.amount_cents - (m.released_cents || 0)), released: money(m.released_cents || 0), paypal_captures: (m.tranches || []).length },
-          checks: [...m.criteria].sort((a, b) => a.position - b.position).map((c) => {
-            const r = v.criterion_results.find((x) => x.criterion_id === c.id)
-            return { id: c.id, check: c.statement, met: r?.passed ?? null, decided_by: r?.layer, why: r?.explanation || '' }
-          }),
-        }
+        return verdictView(m, v, { full: true })
       }
       await new Promise((resolve) => setTimeout(resolve, 2500))
     }

@@ -12,7 +12,8 @@
   the intro, drifting and pointer tilt; without WebGL the flat mark stands in.
 -->
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue'
+import { Play } from 'lucide-vue-next'
 import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import Lenis from 'lenis'
@@ -34,10 +35,33 @@ const canDemo = computed(() => !isDemo && !auth.user)
 const appLink = computed(() => (auth.user ? '/contracts' : '/login'))
 const startLink = computed(() => (auth.user ? '/contracts/new' : '/login'))
 
+// one click from the story to a real recording: the 'v1' sample delivery as Kernel's cloud browser recorded it
+// when the demo was built (replays.json), loaded only when asked for, with its two failures on camera
+const ReplayPlayer = defineAsyncComponent(() => import('@/components/ReplayPlayer.vue'))
+const watching = ref(false)
+const sampleReplay = ref(null)
+// the two failures on camera, timed from the recording's own chapters and marks (re-recording moves them)
+const sampleMoments = ref([])
+const at = (list, test, fallback) => list?.find(test)?.t ?? fallback
+async function watchSample() {
+  if (!sampleReplay.value) {
+    const { default: samples } = await import('@/services/replays.json')
+    const { facts, shots, delivered, ...replay } = samples['northbrew-shop-v1']
+    sampleReplay.value = { ...replay, by: 'kernel', sample: true }
+    sampleMoments.value = [
+      { t: at(replay.chapters, (c) => c.kind === 'form', 0), label: 'Form test', statement: 'The newsletter form submits and the site accepts it', passed: false },
+      { t: at(replay.marks, (m) => m.kind === 'measure' && m.view === 'mobile', 0), label: 'Phone · 375px', statement: 'Nothing on the page is wider than a 375px screen', passed: false },
+    ]
+  }
+  watching.value = true
+}
+// the page behind holds still while the recording is open
+watch(watching, (on) => (on ? lenis?.stop() : lenis?.start()))
+
 const steps = [
   { label: 'Agreed', title: 'Agree what done means.', text: 'In a shared contract room, an AI mediator turns what you both want into checks it can test: the layout at 375px, the exact copy, the cart total. You sign them together.' },
-  { label: 'Held', title: 'PayPal holds the money.', text: 'The client approves a PayPal authorization: a hold, not a charge. The freelancer sees the money is there before starting, and Verdikt renews the hold when PayPal’s 3-day honor period ends.' },
-  { label: 'Checked', title: 'An agent checks the delivery.', text: 'Each signed check runs as a probe in a real browser and against the repo. Most are settled with no model call; Claude judges the rest from the evidence it collected.' },
+  { label: 'Held', title: 'PayPal holds the money.', text: 'The client approves a PayPal authorization: a hold, not a charge. The freelancer sees the money is there before starting, and Verdikt renews the hold when PayPal’s 3-day honor period ends. A milestone can also hold an expense budget with a shopping list of real products from Channel3, and a receipt that names a listed item at its price is reimbursed by rules alone.' },
+  { label: 'Checked', title: 'An agent checks the delivery.', text: 'Each signed check runs as a probe in a cloud browser on Kernel, recorded so both of you can watch it, and against the repo. Most are settled with no model call. Before Claude judges the rest from the evidence it collected, Elastic finds how the most similar checks on other contracts were decided.', watch: true },
   { label: 'Paid', title: 'Proven, so it’s paid.', text: 'When every check passes, PayPal captures the hold and the freelancer is paid, less a 2% fee. If one fails, the money stays held and both sides see exactly why.' },
 ]
 
@@ -225,6 +249,9 @@ onBeforeUnmount(() => {
             <article v-for="(s, i) in steps" :key="s.title" class="step" :class="{ 'is-on': i === active, 'is-past': i < active }" :aria-hidden="i !== active">
               <h2 class="step__title">{{ s.title }}</h2>
               <p class="step__text">{{ s.text }}</p>
+              <button v-if="s.watch" type="button" class="step__watch" :tabindex="i === active ? undefined : -1" @click="watchSample">
+                <Play :size="14" :stroke-width="1.9" aria-hidden="true" /> Watch a recorded check
+              </button>
             </article>
           </div>
         </div>
@@ -267,12 +294,17 @@ onBeforeUnmount(() => {
     <!-- the last word: the two people, the product cut into a stepped shape, the product's words -->
     <LandingClose />
 
+    <ReplayPlayer
+      v-if="sampleReplay" :open="watching" :replay="sampleReplay" :moments="sampleMoments"
+      sub="Sample delivery · northbrew-shop-v1 · recorded on Kernel, served by Verdikt for the demo" @close="watching = false"
+    />
+
     <!-- the footer: the one dark band -->
     <div class="band is-dark">
       <footer class="foot">
         <div class="wrap foot__row">
           <span class="foot__brand"><BrandMark :size="22" /> Verdikt</span>
-          <span>Built on PayPal Orders v2 and Payouts, Claude and Supabase. PayPal sandbox only, so no real money moves.</span>
+          <span>Built on PayPal Orders v2 and Payouts, Claude, Kernel, Elastic, Channel3, AG Grid and AG Studio, Bryntum and Supabase. PayPal sandbox only, so no real money moves.</span>
           <RouterLink to="/design">Design system</RouterLink>
         </div>
       </footer>
@@ -386,6 +418,11 @@ html.is-landing, html.is-landing body { background: #f7f8fa; color-scheme: light
 .step.is-on { opacity: 1; transform: none; filter: none; pointer-events: auto; }
 .step__title { margin: 0; font: 300 clamp(34px, 3.7vw, 56px)/1.02 var(--vk-font); letter-spacing: -.045em; }
 .step__text { max-width: 42ch; margin: 22px 0 0; font: 400 17px/27px var(--vk-font); color: var(--vk-muted); }
+.step__watch {
+  display: inline-flex; align-items: center; gap: 8px; margin-top: 18px; padding: 0; border: 0; background: none; cursor: pointer;
+  font: 400 15px/24px var(--vk-font); color: var(--vk-ink); text-decoration: underline; text-underline-offset: 4px;
+}
+.step__watch:hover { color: var(--vk-accent); }
 
 /* ---- sections below the story */
 .sides { position: relative; padding: clamp(96px, 14vh, 160px) 0; }

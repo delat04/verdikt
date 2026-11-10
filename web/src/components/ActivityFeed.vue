@@ -5,6 +5,8 @@
 <script setup>
 import { computed } from 'vue'
 import { timeAgo, money } from '@/domain/format'
+import { clock } from '@/domain/replay'
+import { RECORDING, lowerFirst } from '@/domain/probes'
 
 const props = defineProps({
   items: { type: Array, required: true },
@@ -61,13 +63,21 @@ const LABEL = {
   'terms.due_changed': (p) => `Accepted: M${p.milestone} is now due ${p.to} (was ${p.from || 'no date'})`,
   'terms.due_declined': (p) => `Declined moving M${p.milestone} to ${p.to}`,
   'terms.due_withdrawn': (p) => `Withdrew the proposal to move M${p.milestone} to ${p.to}`,
-  'expense.product_planned': (p) => `${p.viaAgent ? 'Agent planned' : 'Planned'} a purchase: ${p.title} at ${p.domain}, listed at ${money(p.priceCents)}`,
-  'expense.product_unplanned': (p) => `Took ${p.title} off the planned purchases`,
+  // the shopping list: before signing an item is part of the terms; after, the client adds to the signed list and
+  // the freelancer proposes (listings are always US dollars)
+  'expense.product_planned': (p) => ({
+    terms: `${p.viaAgent ? 'Agent added' : 'Added'} ${p.title} (${p.domain}, ${money(p.priceCents)}) to the shopping list${p.resetSignatures ? ', signatures reset' : ''}`,
+    agreed: `${p.viaAgent ? 'Agent added' : 'Added'} ${p.title} (${p.domain}, ${money(p.priceCents)}) to the signed shopping list`,
+    proposed: `${p.viaAgent ? 'Agent proposed' : 'Proposed'} adding ${p.title} at ${p.domain} (${money(p.priceCents)}) to the shopping list`,
+  }[p.status] || `${p.viaAgent ? 'Agent added' : 'Added'} ${p.title} (${p.domain}, ${money(p.priceCents)}) to the shopping list`),
+  'expense.product_agreed': (p) => `Agreed to ${p.title} at ${p.domain} (${money(p.priceCents)}) on the shopping list`,
+  'expense.product_declined': (p) => `Declined ${p.title} at ${p.domain} (${money(p.priceCents)}) for the shopping list${p.reason ? `: “${p.reason}”` : ''}`,
+  'expense.product_unplanned': (p) => `Took ${p.title} off the shopping list`,
   'expense.checked': (p) => ({
     approved: `Receipt passed every check${p.by === 'claude' ? ' (coverage read by Claude)' : ' — decided by rules, no model'}`,
     rejected: `Receipt for ${money(p.amountCents)} failed ${p.failed} check${p.failed === 1 ? '' : 's'} — not reimbursed`,
     needs_client: `The checks couldn't settle the ${money(p.amountCents)} receipt — the client decides`,
-  }[p.outcome] || 'Receipt checked'),
+  }[p.outcome] || 'Receipt checked') + (p.planned?.length ? ' · on the shopping list' : ''),
   'expense.reimbursed': (p) => `${money(p.amountCents)} reimbursed for ${p.merchant || 'an expense'} — PayPal captured it from the hold${p.by === 'client' ? ' (approved by the client)' : ''}`,
   'expense.declined': (p) => `Declined the ${money(p.amountCents)} claim for ${p.merchant || 'an expense'}`,
   'expense.expired': (p) => `${p.count} expense claim${p.count === 1 ? '' : 's'} closed — the milestone settled first`,
@@ -87,10 +97,15 @@ const LABEL = {
   'dispute.error': () => 'The dispute answer could not be sent to PayPal',
   'work.submitted': (p) => `Work delivered · attempt ${p.attempt}`,
   'verify.started': () => 'Agent started checking',
+  // neutral like every agent row: a recording moves no money
+  'verify.recorded': (p) => `Recorded in Kernel’s cloud browser · ${clock(p.seconds)}${p.sample ? ' · sample' : ''}`,
+  'verify.unrecorded': (p) => `Checked without a recording: ${lowerFirst(RECORDING[p.reason] || 'Kernel was unavailable')}`,
   'verify.passed': (p) => `All ${p.total} checks passed${decidedBy(p)}`,
   'verify.failed': (p) => (p.tampered ? 'Verdict failed on integrity — funds held' : `${p.failed} of ${p.total} checks failed — funds held${decidedBy(p)}`),
   'verdict.appealed': () => 'Verdict appealed — funds stay held for review',
-  'verify.error': () => 'The check could not finish — funds stay held',
+  'precedent.unavailable': () => 'Similar checks couldn’t be looked up — judged on this delivery’s evidence alone',
+  'verify.duplicate_skipped': () =>'This delivery was already decided — the check didn’t run twice',
+  'verify.error': (p) => p.infra ? 'The verifier’s browser stopped twice — nothing was decided, funds stay held' : 'The check could not finish — funds stay held',
   'escrow.capture_failed': () => 'PayPal capture failed — the client can release by hand',
   'terms.draft_failed': () => 'Agent was unavailable — standard checks were used',
 }

@@ -271,6 +271,12 @@ async function closeExpenses(milestone) {
   if (data?.length) await audit({ contractId: milestone.contract_id, milestoneId: milestone.id, actor: 'system', event: 'expense.expired', payload: { count: data.length } })
 }
 
+// what a reimbursement was for, in PayPal's notes: the shopping-list item the receipt named, else the merchant
+const expenseWhat = (e) => {
+  const item = e?.extracted?.planned?.[0]
+  return item ? `${String(item.title || '').slice(0, 60)} from ${item.domain}, on the shopping list` : e?.merchant || 'a project expense'
+}
+
 /** Capture one claim from the milestone's hold, then pay it out. Throws if PayPal refuses; the caller records it. */
 export async function reimburse(expense, by) {
   const { data: m } = await db().from('milestones').select('id, contract_id, title, status, paypal_authorization_id, contract:contracts(currency)').eq('id', expense.milestone_id).single()
@@ -281,7 +287,7 @@ export async function reimburse(expense, by) {
     amountCents: expense.amount_cents,
     currency,
     finalCapture: false,   // the work and the rest of the budget stay held
-    noteToPayer: `Verdikt: ${money(expense.amount_cents, currency)} reimbursed from the expense budget for ${expense.merchant || 'a project expense'} (${m.title})`,
+    noteToPayer: `Verdikt: ${money(expense.amount_cents, currency)} reimbursed from the expense budget for ${expenseWhat(expense)} (${m.title})`,
   })
   await db().from('expenses').update({
     status: 'approved', decided_by: by, decided_at: new Date().toISOString(), paypal_capture_id: capture.id, note: '',
@@ -310,12 +316,12 @@ export async function payoutExpense(id) {
     await audit({ contractId: e.contract_id, milestoneId: e.milestone_id, actor: 'system', event: 'payout.needs_email', payload: { amountCents: e.amount_cents, expenseId: id } })
     return { status: 'NEEDS_EMAIL' }
   }
-  const what = e.merchant || 'a project expense'
+  const what = expenseWhat(e)
   const batch = await paypal.createPayout({
     senderBatchId: e.payout_batch_id ? `vkx-${id.slice(0, 18)}-${Date.now()}` : `vkx-${id}`,
     email, amountCents: e.amount_cents, currency, itemId: `x-${id.slice(0, 24)}`,
     subject: `Reimbursed: ${money(e.amount_cents, currency)} for ${what}`,
-    note: `Verdikt reimbursed ${money(e.amount_cents, currency)} for ${what} from the expense budget of "${e.milestone.title}" (${e.contract.title}). Expenses carry no Verdikt fee.`,
+    note: `Verdikt reimbursed ${money(e.amount_cents, currency)} for ${what}${e.extracted?.planned?.[0] ? ',' : ''} from the expense budget of "${e.milestone.title}" (${e.contract.title}). Expenses carry no Verdikt fee.`,
   })
   const batchId = batch.batch_header?.payout_batch_id
   await db().from('expenses').update({ payout_batch_id: batchId, payout_status: batch.batch_header?.batch_status || 'PENDING', payout_email: email }).eq('id', id)

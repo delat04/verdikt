@@ -9,6 +9,7 @@ import { requireUser, milestoneFor } from '../lib/auth.js'
 import { verifyInBackground } from '../agent/verify.js'
 import { reviewAppealInBackground } from '../agent/appeal.js'
 import { release } from '../lib/flow.js'
+import { syncMilestones } from '../lib/precedent.js'
 
 const isUrl = (v) => /^https:\/\/[^\s/.]+\.[^\s]+/i.test(String(v || '').trim())
 
@@ -72,6 +73,8 @@ export default async function deliveryRoutes(app) {
     if (!['release', 'partial'].includes(a.recommendation)) return reply.code(409).send({ error: 'This review upheld the verdict' })
     await db().from('appeals').update({ status: 'accepted', closed_at: new Date().toISOString() }).eq('id', a.id)
     await audit({ contractId: m.contract.id, milestoneId: m.id, actor: 'client', event: 'appeal.accepted', payload: { releaseCents: a.release_cents } })
+    // the overturned checks become precedent as decided on appeal (in the background, off the money path)
+    void syncMilestones([m.id])
     // the review's figure is the milestone's total release; tranches already paid count toward it
     const capture = await release({ ...m, contract_id: m.contract.id }, 'client', { amountCents: Math.max(100, a.release_cents - (m.released_cents || 0)) })
     return { status: 'released', captureId: capture.id }
@@ -84,6 +87,7 @@ export default async function deliveryRoutes(app) {
     await db().from('appeals').update({ status: 'declined', closed_at: new Date().toISOString() }).eq('id', a.id)
     await db().from('milestones').update({ status: 'failed' }).eq('id', m.id)
     await audit({ contractId: m.contract.id, milestoneId: m.id, actor: 'client', event: 'appeal.declined', payload: {} })
+    void syncMilestones([m.id])   // the first verdict stands: precedent records it as upheld
     return { status: 'failed' }
   })
 }

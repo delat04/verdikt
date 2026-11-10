@@ -72,6 +72,7 @@
   --vk-selected: rgba(14, 15, 18, .07);
   --vk-thumb: #FFFFFF;         /* the chip a filter glides to (white on grey; flips to white-on-black in dark) */
   --vk-thumb-fg: #0E0F12;
+  --vk-media-bg: #FFFFFF;      /* behind store product images (packshots are made for white); always with a 1px --vk-line */
 
   /* lines — always 1px solid */
   --vk-line-subtle: #E5E7EB;
@@ -118,6 +119,7 @@
   --vk-selected: rgba(255, 255, 255, .08);
   --vk-thumb: #F2F3F5;
   --vk-thumb-fg: #0E0F12;
+  --vk-media-bg: #E8EAEE;      /* a light tile, not glaring white, so packshots keep their edges on a dark page */
 
   --vk-line-subtle: #212328;
   --vk-line: #2C2E34;
@@ -154,7 +156,7 @@
     color-scheme: dark;
     --vk-canvas: #060607; --vk-surface: #111214; --vk-surface-2: #18191C; --vk-raised: #222327;
     --vk-hover: rgba(255, 255, 255, .05); --vk-selected: rgba(255, 255, 255, .08);
-    --vk-thumb: #F2F3F5; --vk-thumb-fg: #0E0F12;
+    --vk-thumb: #F2F3F5; --vk-thumb-fg: #0E0F12; --vk-media-bg: #E8EAEE;
     --vk-line-subtle: #212328; --vk-line: #2C2E34; --vk-line-strong: #40434B;
     --vk-ink: #F2F3F5; --vk-ink-2: #D6D8DE; --vk-muted: #A9ADB7; --vk-faint: #868B97; --vk-on-ink: #0E0F12;
     --vk-accent: #3560FA; --vk-accent-hover: #4C74FF; --vk-accent-text: #9DB2FF;

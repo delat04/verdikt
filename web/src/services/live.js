@@ -22,7 +22,12 @@ async function call(path, { method = 'POST', body } = {}) {
     body: method === 'GET' ? undefined : JSON.stringify(body ?? {}),
   })
   const json = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`)
+  // the message stays the API's sentence; the code and timing ride along for screens that branch on them
+  if (!res.ok) {
+    throw Object.assign(new Error(json.error || `Request failed (${res.status})`), {
+      status: res.status, code: json.code, retryAfterSec: json.retryAfterSec, retryAt: json.retryAt, resetsOn: json.resetsOn,
+    })
+  }
   return json
 }
 
@@ -79,6 +84,8 @@ function mapContract(c) {
           integrity: v.report?.tamper || null,
           engine: v.report?.engine || null,
           replay: v.report?.replay || null,
+          site: v.report?.site || null,
+          precedent: v.report?.precedent || null,
           results: (v.criterion_results || []).map((r) => ({
             criterionId: r.criterion_id, passed: r.passed, confidence: Number(r.confidence), explanation: r.explanation, evidence: r.evidence || [],
             layer: r.layer || 'model', probes: r.probes || [],
@@ -253,6 +260,8 @@ export const live = {
   searchBudgetProducts: (milestoneId, query) => call(`/milestones/${milestoneId}/expenses/products`, { body: { query } }),
   planProduct: (milestoneId, productId) => call(`/milestones/${milestoneId}/expenses/plan`, { body: { productId } }),
   unplanProduct: (milestoneId, productId) => call(`/milestones/${milestoneId}/expenses/plan/${productId}`, { method: 'DELETE' }),
+  agreePlanItem: (milestoneId, productId) => call(`/milestones/${milestoneId}/expenses/plan/${productId}/agree`),
+  declinePlanItem: (milestoneId, productId, reason = '') => call(`/milestones/${milestoneId}/expenses/plan/${productId}/decline`, { body: { reason } }),
   approveExpense: (id) => call(`/expenses/${id}/approve`),
   declineExpense: (id, reason = '') => call(`/expenses/${id}/decline`, { body: { reason } }),
   expenseReceipt: (id) => call(`/expenses/${id}/receipt`, { method: 'GET' }),

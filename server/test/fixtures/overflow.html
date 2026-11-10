@@ -1,0 +1,33 @@
+<!doctype html>
+<!-- inspect.test.js: a delivery with three known defects. At 375px the 412px .pricing-card is wider than the
+     screen; one paragraph is white on white (concealed text); the signup form posts to /api/subscribe, which
+     the test server answers with 404. The faint paragraph gives axe a contrast violation. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Northbrew</title>
+  <style>
+    body { margin: 0; font: 16px/1.5 Arial, sans-serif; background: #fff; color: #222 }
+    main { padding: 16px }
+    .pricing-card { width: 412px; box-sizing: border-box; border: 1px solid #ccc; padding: 16px; margin-top: 900px }
+    .concealed { color: #fff; background: #fff }
+    .faint { color: #ddd }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Northbrew coffee</h1>
+    <p class="faint">Roasted weekly in small batches</p>
+    <p class="concealed">Hidden fixture paragraph: white text on a white background.</p>
+    <section class="pricing-card">
+      <h2>Subscription</h2>
+      <p>Billed monthly, cancel anytime.</p>
+    </section>
+    <form method="post" action="/api/subscribe">
+      <label>Email <input type="email" name="email" required></label>
+      <button type="submit">Subscribe</button>
+    </form>
+  </main>
+</body>
+</html>

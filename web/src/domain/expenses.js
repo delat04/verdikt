@@ -1,7 +1,8 @@
 /* Expense budgets: money held with a milestone for what the work needs (a domain, hosting, fonts…),
    reimbursed one receipt at a time. Shared by the Expenses tab, the payment panel and the demo. */
 
-export const COVER_SUGGESTIONS = ['Domain', 'Hosting', 'Stock photos', 'Fonts', 'Icons & illustrations', 'API credits', 'Software licenses', 'Email']
+// the budget lines, from the rules file the server checks receipts with (a byte-identical copy)
+export { COVER_SUGGESTIONS } from './expenseRules.js'
 
 export const EXPENSE_STATUS = {
   checking: { label: 'Checking', tone: 'warn', live: true },
@@ -21,7 +22,8 @@ export function expenseTotals(m) {
   const budget = m?.expenseBudgetCents || 0
   const list = m?.expenses || []
   const spent = list.filter((e) => e.captureId).reduce((s, e) => s + e.amountCents, 0)
-  const waiting = list.filter((e) => ['checking', 'needs_client'].includes(e.status)).reduce((s, e) => s + e.amountCents, 0)
+  // a failed capture ('error') still holds its amount until the client approves or declines it, as on the server
+  const waiting = list.filter((e) => ['checking', 'needs_client', 'error'].includes(e.status) && !e.captureId).reduce((s, e) => s + e.amountCents, 0)
   return { budget, spent, waiting, left: Math.max(0, budget - spent - waiting) }
 }
 

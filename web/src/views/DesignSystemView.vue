@@ -30,10 +30,15 @@ import MiniRail from '@/components/MiniRail.vue'
 import StageTrack from '@/components/StageTrack.vue'
 import NextStepCard from '@/components/NextStepCard.vue'
 import QueueCapsule from '@/components/QueueCapsule.vue'
+import VerdictReport from '@/components/VerdictReport.vue'
+import PrecedentLine from '@/components/PrecedentLine.vue'
+import { stanceOf } from '@/domain/precedent'
 import { vGlide } from '@/directives/glide'
 import { STATUS } from '@/domain/milestone'
 import { useTheme } from '@/composables/useTheme'
 import { toast } from '@/composables/useToast'
+import { momentFor } from '@/domain/replay'
+import SAMPLES from '@/services/replays.json'
 
 const { theme, setTheme } = useTheme()
 const themeModel = ref(theme.value)
@@ -91,6 +96,66 @@ const tracks = computed(() => ['funded', 'verifying', 'failed', 'released'].map(
   return m
 }))
 
+// ---- fixture: the recording card and player in each state, from a real sample recording (replays.json)
+const recState = ref('chapters')
+const recCriteria = [
+  { id: 'r1', position: 1, statement: 'No horizontal scrolling at 375px wide' },
+  { id: 'r2', position: 2, statement: 'The signup form submits and shows a confirmation' },
+  { id: 'r3', position: 3, statement: 'The page loads without errors at 1440px and 375px' },
+]
+const recSubmission = computed(() => {
+  const s = SAMPLES['northbrew-shop-v1']
+  const marks = [...(s?.chapters || []), ...(s?.marks || [])]
+  const res = [
+    { criterionId: 'r1', passed: false, explanation: 'At 375px the page is 412px wide.', probes: [{ type: 'no_horizontal_scroll', status: 'fail', observed: 'page is 412px wide, screen is 375px' }], evidence: [] },
+    { criterionId: 'r2', passed: false, explanation: 'The form posted to /api/subscribe and got a 404.', probes: [{ type: 'form_submits', status: 'fail', observed: 'POST /api/subscribe → 404' }], evidence: [] },
+    { criterionId: 'r3', passed: true, explanation: 'Loaded with HTTP 200 at both widths.', probes: [{ type: 'loads', status: 'pass', observed: 'HTTP 200' }], evidence: [] },
+  ].map((r) => ({ ...r, layer: 'probe', confidence: 0.99, evidence: [momentFor(r, marks), { type: 'screenshot', label: 'Desktop · 1440px', url: s?.shots?.desktop }].filter(Boolean) }))
+  const { facts, shots, delivered, ...replay } = s || {}
+  const states = {
+    chapters: { replay: { ...replay, sample: true }, site: { browser: 'kernel', region: s?.region, chrome: s?.chrome, recording: 'recorded', sample: true } },
+    legacy: { replay: { url: s?.url, seconds: s?.seconds }, site: null },
+    missing: { replay: { ...replay, url: '/replays/missing-fixture.mp4', sample: true }, site: null },
+    none: { replay: null, site: { browser: 'kernel', region: 'us-east', chrome: '141', recording: 'no_video', retry: { at: 'mobile', reason: 'browser_lost' } } },
+  }
+  return {
+    id: 'fx', attempt: 1, liveUrl: delivered, createdAt: ago(0.3),
+    verdict: {
+      id: 'fxv', outcome: 'fail', confidence: 0.96, createdAt: ago(0.28), summary: 'Fixture: two checks failed on camera.', results: res,
+      engine: { decided: { probe: 3, ocr: 0, model: 0, reused: 0 }, tokens: {}, ms: { total: 16800 }, probes: { run: 3 } },
+      ...states[recState.value],
+    },
+  }
+})
+
+// ---- fixture: PrecedentLine in each of its five states, with v2 cases as a live verdict stores them (Elastic)
+const daysAgo = (d) => new Date(Date.now() - d * 864e5).toISOString()
+const cartCases = [
+  { id: 'fx-c1', statement: 'A product can be added to the cart and the total updates', kind: 'functional', met: true, metFirst: true, layer: 'model', appeal: null, reason: 'Adding one product raised the cart total by exactly its listed price.', at: daysAgo(23), score: 0.912, band: 'close' },
+  { id: 'fx-c2', statement: 'Adding a product to the cart updates the cart total', kind: 'functional', met: true, metFirst: false, layer: 'appeal', appeal: 'overturned', reason: 'On second review the total matched once the selected size was counted.', at: daysAgo(64), score: 0.874, band: 'close' },
+  { id: 'fx-c3', statement: 'The cart total matches the listed price after adding a product', kind: 'functional', met: false, metFirst: false, layer: 'model', appeal: null, reason: 'The total showed twice the listed price after a single add.', at: daysAgo(110), score: 0.531, band: 'related' },
+  { id: 'fx-c4', statement: 'Products can be added to the cart from the shop page', kind: 'functional', met: true, metFirst: false, layer: 'probe', appeal: null, reason: 'On the second delivery each product card had a working add button.', at: daysAgo(5), score: 0.402, band: 'related' },
+]
+const copyCases = [
+  { id: 'fx-k1', statement: 'The copy from the brief is on the page with no placeholder text', kind: 'content', met: true, metFirst: true, layer: 'model', appeal: null, reason: 'Every section of the brief was on the page, word for word.', at: daysAgo(40), score: 0.803, band: 'close' },
+  { id: 'fx-k2', statement: 'No lorem ipsum or placeholder text left on the page', kind: 'content', met: false, metFirst: false, layer: 'probe', appeal: null, reason: 'Two product descriptions still read “…”.', at: daysAgo(132), score: 0.612, band: 'close' },
+  { id: 'fx-k3', statement: 'All copy from the brief is present', kind: 'content', met: false, metFirst: false, layer: 'appeal', appeal: 'upheld', reason: 'One section of the brief, the delivery terms, was left out of the page.', at: daysAgo(77), score: 0.455, band: 'related' },
+  { id: 'fx-k4', statement: 'The about section uses the copy from the brief', kind: 'content', met: true, metFirst: true, layer: 'model', appeal: null, reason: 'The about section matched the brief, one heading reworded.', at: daysAgo(2), score: 0.318, band: 'related' },
+]
+const precV2 = (items, passed, departsBecause = '') => ({ type: 'precedent', v: 2, label: `Similar checks · ${items.length}`, ...stanceOf(items, passed), departsBecause, items })
+const precMeta = {
+  status: 'ok', ms: 412, asked: ['px-follows', 'px-split', 'px-departs', 'px-none'], matched: 3, cases: 12, corpus: 1284,
+  embed: '.jina-embeddings-v5-text-small', reranker: '.jina-reranker-v3', floor: 0.22, asOf: daysAgo(0.02),
+  digest: '9f2c4e1ab07d53e8c6f1a2b49d0e7c3518a6f4b2c9d1e0a7f3b5c8d2e6a1f4b9',
+}
+const precFixtures = [
+  { state: 'Follows', id: 'px-follows', statement: 'Adding a product updates the cart total', passed: true, item: precV2(cartCases, true), meta: precMeta, layer: 'model' },
+  { state: 'Split', id: 'px-split', statement: 'All copy from the brief is on the page', passed: false, item: precV2(copyCases, false), meta: precMeta, layer: 'model', explanation: 'The shipping section is missing from the page.' },
+  { state: 'Departs', id: 'px-departs', statement: 'Adding a product updates the cart total', passed: false, item: precV2(cartCases, false, 'The similar deliveries showed a price on every product.'), meta: precMeta, layer: 'model', open: true },
+  { state: 'None', id: 'px-none', statement: 'The booking calendar blocks out public holidays', passed: true, item: null, meta: precMeta, layer: 'model' },
+  { state: 'Unavailable', id: 'px-unavailable', statement: 'The booking calendar blocks out public holidays', passed: true, item: null, meta: { ...precMeta, status: 'timeout', digest: null, cases: 0 }, layer: 'model' },
+]
+
 const queueRows = [
   { c: { id: 'q1', title: 'Northbrew landing + shop' }, step: { actor: 'you', short: 'Fund $1,800', action: 'fund' } },
   { c: { id: 'q2', title: 'Atlas onboarding flow' }, step: { actor: 'you', short: 'Sign the terms', action: 'sign' } },
@@ -129,7 +194,7 @@ const typeScale = [
       </nav>
       <VSegmented
         :model-value="themeModel" block label="Theme"
-        :options="[{ value: 'light', label: '', icon: Sun }, { value: 'dark', label: '', icon: Moon }, { value: 'system', label: '', icon: Monitor }]"
+        :options="[{ value: 'light', label: '', icon: Sun, aria: 'Light theme' }, { value: 'dark', label: '', icon: Moon, aria: 'Dark theme' }, { value: 'system', label: '', icon: Monitor, aria: 'Match the device' }]"
         @update:model-value="pickTheme"
       />
     </aside>
@@ -360,6 +425,25 @@ const typeScale = [
               <ScoreRing :value="50" :pass="false" label="3/6" :size="64" />
             </div>
           </VCard>
+          <VCard title="Recording" sub="Fixture · a real sample recording in each state the report can show." class="span2">
+            <VSegmented
+              v-model="recState" label="Recording state"
+              :options="[{ value: 'chapters', label: 'Chapters' }, { value: 'legacy', label: 'Legacy' }, { value: 'missing', label: 'Missing file' }, { value: 'none', label: 'No recording' }]"
+            />
+            <div class="rec-fixture"><VerdictReport :criteria="recCriteria" :submission="recSubmission" /></div>
+          </VCard>
+          <VCard title="Precedent" sub="Fixture · how similar checks on other contracts were decided, under a check Claude judged. Departs opens with its reason; none and unavailable are a quiet line." class="span2">
+            <ul class="prec-fixtures">
+              <li v-for="f in precFixtures" :key="f.id" class="prec-fixture">
+                <p class="vk-eyebrow">{{ f.state }}</p>
+                <p class="prec-fixture__statement">{{ f.statement }}</p>
+                <PrecedentLine
+                  :criterion-id="f.id" :item="f.item" :passed="f.passed" :explanation="f.explanation || ''" :layer="f.layer"
+                  :meta="f.meta" :asked="f.meta.asked.includes(f.id)" :default-open="!!f.open"
+                />
+              </li>
+            </ul>
+          </VCard>
           <VCard title="Receipts" variant="well">
             <dl class="vk-kv">
               <div class="vk-kv__row"><dt class="vk-kv__k">PayPal order</dt><dd class="vk-kv__v"><VCopy value="DEMO-ORD-7H2K9P" /></dd></div>
@@ -449,6 +533,13 @@ const typeScale = [
 .sec__lede { margin: -4px 0 20px; max-width: 760px; font: var(--vk-type-body); color: var(--vk-muted); }
 .sec__lede b { color: var(--vk-ink); font-weight: 400; }
 .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.span2 { grid-column: 1 / -1; }
+.rec-fixture { margin-top: 16px; }
+.prec-fixtures { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.prec-fixture { min-width: 0; padding: 14px 0; border-bottom: 1px solid var(--vk-line-subtle); }
+.prec-fixture:first-child { padding-top: 4px; }
+.prec-fixture:last-child { border-bottom: 0; padding-bottom: 0; }
+.prec-fixture__statement { margin: 6px 0 0; font: var(--vk-type-body); color: var(--vk-ink); }
 .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .note { margin: 14px 0 0; font: var(--vk-type-dense); color: var(--vk-muted); }
@@ -494,13 +585,19 @@ const typeScale = [
 .icons { color: var(--vk-ink-2); gap: 18px; }
 
 @media (max-width: 900px) {
-  .ds { grid-template-columns: 1fr; }
+  /* minmax(0, 1fr): a wide demo inside one card stays in that card, it never widens the page past a phone */
+  .ds { grid-template-columns: minmax(0, 1fr); }
   .ds__nav { position: static; height: auto; margin: 12px 12px 0; flex-direction: row; flex-wrap: wrap; align-items: center; }
   .ds__links { display: none; }
-  .grid2, .grid3, .fonts { grid-template-columns: 1fr; }
+  .grid2, .grid3, .fonts { grid-template-columns: minmax(0, 1fr); }
+  .grid2 > *, .grid3 > * { min-width: 0; }
   .trow { grid-template-columns: 1fr; gap: 4px; }
   .nav-demo { flex-direction: column; }
   .nav-demo__side { width: auto; border-right: 0; border-bottom: 1px solid var(--vk-line); }
   .tracks__row { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  /* the rail and recording state controls are wider than a phone: they scroll inside their card instead */
+  .ds :deep(.vk-seg) { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 }
 </style>

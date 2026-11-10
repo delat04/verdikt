@@ -5,6 +5,7 @@
     ============================================================================ */
 
 import { money, firstName } from './format'
+import { canAgree, itemLifecycle } from './expenseRules'
 
 export const STATUS = {
   draft:            { label: 'Not started',      tone: 'neutral' },
@@ -155,7 +156,8 @@ export const PAYOUT = {
  * What should `role` do next on this contract?
  * → { key, tone, eyebrow, short, title, sub, action, actor, milestoneId }
  *   short:  a two-to-four word label for tight places (the queue capsule, ⌘K)
- *   action: a verb the view maps to a button ('sign' | 'fund' | 'submit' | 'resubmit' | 'invite' | 'review' | null)
+ *   action: a verb the view maps to a button ('sign' | 'fund' | 'submit' | 'resubmit' | 'invite' | 'review' | 'expenses' | null)
+ *   actionLabel: (optional) the button's words when the verb's usual label doesn't fit, e.g. a list item to review
  *   actor:  'you' | 'them' | 'agent' | 'none' — who the contract is waiting on
  */
 export function nextStep(contract, role) {
@@ -164,14 +166,33 @@ export function nextStep(contract, role) {
   if (role !== 'client' || !step || step.actor === 'you') return step
   const ms = contract.milestones.find((x) => x.expenses?.some((e) => e.status === 'needs_client'))
   const e = ms?.expenses.find((x) => x.status === 'needs_client')
-  if (!e) return step
   const other = counterparty(contract, role)
+  if (!e) return listStep(contract, other) || step
   return {
     key: 'expense', tone: 'accent', eyebrow: `M${ms.position} · Expenses`, actor: 'you', action: 'expenses', milestoneId: ms.id,
     short: `Decide a ${money(e.amountCents, contract.currency)} expense`,
     title: `${other ? firstName(other.name) : 'The freelancer'} claimed ${money(e.amountCents, contract.currency)} the checks couldn't settle`,
     sub: `${e.merchant || 'A receipt'}${e.purpose ? ` — ${e.purpose}` : ''}. Look at the receipt and reimburse or decline it; it's within the expense budget you agreed.`,
   }
+}
+
+/* After signing, an item the freelancer (or their agent) proposed for a shopping list waits for the client to
+   agree or decline (domain/expenseRules.js decides what is still open to agree to). */
+function listStep(contract, other) {
+  if (!termsSigned(contract)) return null
+  for (const m of contract.milestones || []) {
+    if (['released', 'refunded'].includes(m.status)) continue
+    const item = (m.expenseProducts || []).find((p) => canAgree(p, { role: 'client', signedBoth: true, lifecycle: itemLifecycle(p, m.expenses || []) }).ok)
+    if (!item) continue
+    const name = other ? firstName(other.name) : 'The freelancer'
+    return {
+      key: 'list', tone: 'accent', eyebrow: `M${m.position} · Shopping list`, actor: 'you', action: 'expenses', actionLabel: 'Review the item', milestoneId: m.id,
+      short: 'Review a list item',
+      title: `${name} proposed adding ${item.title} (${money(item.priceCents, 'USD')}) to the shopping list`,
+      sub: `${item.viaAgent ? `${name}'s agent proposed it. ` : ''}Agree and a receipt from ${item.domain} that names it is reimbursed at once by rules. Decline and it's off the list.`,
+    }
+  }
+  return null
 }
 
 function baseStep(contract, role) {

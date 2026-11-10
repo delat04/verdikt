@@ -26,6 +26,11 @@ function hits(text, source) {
   return out
 }
 
+/** Lines in any other text that address the verifier, e.g. a past check before it becomes precedent (lib/precedent.js). */
+export function scanText(text, source = 'precedent') {
+  return hits(text, source)
+}
+
 /** @returns {{ concealed: Array, visible: Array, repo: Array }} lines that address the verifier, by where they were found */
 export function scanForInjection(site, repo) {
   const concealed = []

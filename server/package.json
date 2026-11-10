@@ -11,8 +11,14 @@
     "db:migrate": "node --env-file-if-exists=.env scripts/migrate.js",
     "dev": "node --env-file-if-exists=.env --watch-path=src src/index.js",
     "start": "node --env-file-if-exists=.env src/index.js",
+    "test": "node --test \"test/**/*.test.js\"",
     "paypal:smoke": "node --env-file-if-exists=.env scripts/paypal-smoke.js",
-    "precedent:backfill": "node --env-file-if-exists=.env scripts/precedent-backfill.js"
+    "kernel:smoke": "node --env-file-if-exists=.env scripts/kernel-smoke.js",
+    "replays:record": "node --env-file-if-exists=.env scripts/record-samples.js",
+    "precedent:sync": "node --env-file-if-exists=.env scripts/precedent-sync.js",
+    "precedent:backfill": "node --env-file-if-exists=.env scripts/precedent-sync.js",
+    "precedent:try": "node --env-file-if-exists=.env scripts/precedent-try.js",
+    "precedent:calibrate": "node --env-file-if-exists=.env scripts/precedent-calibrate.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.5.0",

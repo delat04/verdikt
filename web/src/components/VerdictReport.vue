@@ -5,19 +5,24 @@
   Failed checks come first: they are the only thing anyone needs to act on.
 -->
 <script setup>
-import { ref, computed } from 'vue'
-import { Check, X, Minus, Globe, Github, Circle, ShieldAlert, Play } from 'lucide-vue-next'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { Check, X, Minus, Globe, Github, Circle, ShieldAlert, Play, VideoOff } from 'lucide-vue-next'
 import VPill from './ui/VPill.vue'
 import VModal from './ui/VModal.vue'
 import VCopy from './ui/VCopy.vue'
 import ScoreRing from './ScoreRing.vue'
-import { timeAgo, hostOf } from '@/domain/format'
-import { LAYER, STAGE, probeLabel, tokensLabel } from '@/domain/probes'
+import ReplayPlayer from './ReplayPlayer.vue'
+import PrecedentLine from './PrecedentLine.vue'
+import { timeAgo, hostOf, shortDate, clock } from '@/domain/format'
+import { LAYER, STAGE, PRECEDENT_SAMPLE_STAGE, RECORDING, probeLabel, tokensLabel, stepLabel, provenance, retryLine, chapterShort } from '@/domain/probes'
 
 const props = defineProps({
   criteria: { type: Array, required: true },
   submission: { type: Object, required: true },
   progress: { type: Object, default: null },     // { [criterionId]: pending | running | pass | fail, '@': { stage, by } } while verifying
+  // the check stopped before a verdict (verify.error: the browser lost twice, the model or the database down). The
+  // report can't tell which, so it says only what's true for all of them: nothing decided, money held
+  stalled: { type: Boolean, default: false },
 })
 
 const verdict = computed(() => props.submission.verdict)
@@ -52,18 +57,107 @@ const deterministic = computed(() => (engine.value ? (engine.value.decided.probe
 
 const zoom = ref(null)
 
-// the browser session on Kernel, as video
+// one of the demo's sample deliveries (web/public/samples) is named for what it is, not for the host serving it
+const deliveryLabel = (url) => {
+  const sample = /\/samples\/([\w-]+)\.html$/.exec(url || '')?.[1]
+  return sample ? `${sample} · sample site` : hostOf(url)
+}
+
+// ---- the browser session, recorded in Kernel's cloud: a card with its chapters and where checks failed, and the
+// player, opened at the start or at the second a check was decided (its 'moment' evidence)
 const replay = computed(() => verdict.value?.replay || null)
 const watching = ref(false)
-
-// precedent (Elastic): how the most similar checks elsewhere were decided, against this one's outcome
-const precedentOf = (r) => r.evidence?.find((e) => e.type === 'precedent') || null
-function agreement(r) {
-  const p = precedentOf(r)
-  if (!p) return null
-  const same = p.items.filter((x) => x.met === r.passed).length
-  return { same, total: p.items.length, consistent: same * 2 >= p.items.length }
+const startAt = ref(null)
+function openAt(t) {
+  startAt.value = Number.isFinite(t) ? t : null
+  watching.value = true
 }
+const seconds = computed(() => Number(replay.value?.seconds) || 0)
+const momentOf = (r) => r.evidence?.find((e) => e.type === 'moment') || null
+// every check's moment, for the player: what was measured there and whether it was met
+const moments = computed(() => (verdict.value?.results || []).flatMap((r) => {
+  const m = momentOf(r)
+  return m ? [{ t: m.t, label: m.label, statement: byId.value[r.criterionId]?.statement || '', passed: r.passed }] : []
+}))
+const failedOnCamera = computed(() => moments.value.filter((m) => !m.passed))
+// one link per second shown, however many checks failed there
+const failLinks = computed(() => [...new Map(failedOnCamera.value.map((m) => [`${m.label}@${m.t}`, m])).values()].sort((a, b) => a.t - b.t))
+// the sub names the chapters views first, then the form test and the sub-pages: 'Desktop · Phone · Form test'
+const RANK = (c) => (c.kind === 'view' ? (c.view === 'mobile' ? 1 : 0) : c.kind === 'form' ? 2 : 3)
+const cardSub = computed(() => {
+  const names = [...new Set([...(replay.value?.chapters || [])].sort((a, b) => RANK(a) - RANK(b) || a.t - b.t).map(chapterShort))]
+  const line = [...names, 'recorded in Kernel’s cloud browser', ...(replay.value?.sample ? ['sample delivery'] : [])].join(' · ')
+  return line.charAt(0).toUpperCase() + line.slice(1)
+})
+// the chapter rail: each chapter as wide as it runs (the first from 0:00), so a failure tick sits at t / seconds
+const bar = computed(() => {
+  const list = (replay.value?.chapters || []).filter((c) => c.inVideo !== false && c.t < seconds.value).sort((a, b) => a.t - b.t)
+  return list.map((c, i) => ({ ...c, grow: Math.max(0.01, (list[i + 1]?.t ?? seconds.value) - (i ? c.t : 0)) }))
+})
+const ticks = computed(() => (seconds.value ? failLinks.value.filter((m) => m.t <= seconds.value).map((m) => (m.t / seconds.value) * 100) : []))
+const poster = computed(() => replay.value?.poster
+  || verdict.value?.results.flatMap((r) => r.evidence || []).find((e) => e.type === 'screenshot' && e.label === 'Desktop · 1440px')?.url
+  || null)
+// the player's sub: which attempt, what was delivered, when it was recorded
+const hostLabel = (url) => /\/samples\/([\w-]+)\.html$/.exec(url || '')?.[1] || hostOf(url)
+const playerSub = computed(() => `Attempt ${props.submission.attempt} · ${hostLabel(props.submission.liveUrl)} · ${shortDate(replay.value?.recordedAt || verdict.value?.createdAt)}`)
+
+// ---- where the check ran, and why there's no video when there isn't one
+const site = computed(() => verdict.value?.site || null)
+const where = computed(() => provenance(site.value))
+const retried = computed(() => retryLine(site.value))
+const whereLine = computed(() => [where.value && retried.value && !/\.$/.test(where.value) ? `${where.value}.` : where.value, retried.value].filter(Boolean).join(' '))
+const unrecorded = computed(() => {
+  const s = site.value
+  if (!s || replay.value || !((s.recording && s.recording !== 'recorded') || s.fallback)) return null
+  const why = RECORDING[s.fallback || s.recording] || 'Kernel was unavailable'
+  // the provenance line above already gives this reason: say it once
+  return whereLine.value.includes(why) ? null : why
+})
+
+// ---- live: what the browser is doing, and for how long it's been recording (a client-side clock from startedAt)
+const stageLine = computed(() => (meta.value.stage === 'browser' && meta.value.step ? stepLabel(meta.value) : null)
+  // the demo looks nothing up: its similar checks are the sample history's, said as such (like its Kernel recording)
+  || (meta.value.stage === 'precedent' && meta.value.precedent?.sample ? PRECEDENT_SAMPLE_STAGE : null)
+  || STAGE[meta.value.stage] || 'Checking')
+const recordingNow = computed(() => live.value && meta.value.stage === 'browser' && !!meta.value.recording)
+// the demo's sample walk records nothing: it plays back the run Kernel recorded when the demo was built, so no clock
+const replayingSample = computed(() => live.value && meta.value.stage === 'browser' && !!meta.value.sample)
+const tick = ref(Date.now())
+let timer = null
+watch(() => live.value && !!meta.value.startedAt, (on) => {
+  clearInterval(timer)
+  timer = null
+  if (!on) return
+  tick.value = Date.now()
+  timer = setInterval(() => { tick.value = Date.now() }, 1000)
+}, { immediate: true })
+onBeforeUnmount(() => clearInterval(timer))
+const elapsed = computed(() => Math.max(0, (tick.value - Date.parse(meta.value.startedAt)) / 1000) || 0)
+
+// precedent (Elastic): how the most similar checks elsewhere were decided. Each Claude-judged row says it in its
+// PrecedentLine; the engine line counts them; live, the model stage says how many it was shown
+const precedentOf = (r) => r.evidence?.find((e) => e.type === 'precedent') || null
+const seen = computed(() => verdict.value?.precedent || null)
+const PREC_FOUND = ['ok', 'sample']
+const PREC_DOWN = ['timeout', 'error', 'degraded']
+// the live line under the model stage: sample (the demo), found, none, down, or null (an older server sent no
+// status: say nothing rather than claim a search found nothing)
+const liveSeen = computed(() => {
+  const p = meta.value.precedent
+  if (!p) return null
+  if (p.sample || p.status === 'sample') return 'sample'
+  if (p.status === 'ok') return p.cases ? 'found' : 'none'
+  return PREC_DOWN.includes(p.status) ? 'down' : null
+})
+// a failed check's panel opens by itself only where it fits beside the report: on a phone the line and its
+// reason stay, and the cases are one tap away
+const wide = ref(typeof window === 'undefined' || !window.matchMedia || window.matchMedia('(min-width: 561px)').matches)
+// the evidence boxes show screenshots, moments and logs; precedent has its own line, so it never opens one alone
+const hasEvidence = (r) => (r.evidence || []).some((e) => e.type !== 'precedent')
+const receiptLabel = computed(() => (engine.value?.receiptCovers?.includes('precedent')
+  ? 'Copy the verdict receipt (sha-256 of the specs, the evidence, the precedent shown to the verifier and the results)'
+  : 'Copy the verdict receipt (sha-256 of the specs, the evidence and the results)'))
 </script>
 
 <template>
@@ -82,15 +176,27 @@ function agreement(r) {
           <VPill v-if="live" tone="warn" live>Checking · {{ checked }} of {{ total }}</VPill>
           <VPill v-else-if="verdict?.outcome === 'pass'" tone="ok">Passed</VPill>
           <VPill v-else-if="verdict?.outcome === 'fail'" tone="danger">Not yet</VPill>
+          <VPill v-else-if="stalled" tone="neutral">Not decided</VPill>
           <VPill v-else tone="neutral">Queued</VPill>
           <span class="vk-faint report__attempt">Attempt {{ submission.attempt }} · {{ timeAgo(submission.createdAt) }}</span>
         </div>
         <p class="report__text">
-          {{ verdict ? verdict.summary : 'Probes run first: layout, exact copy, status, console, accessibility, the repository. Claude only judges what they can’t settle.' }}
+          {{ verdict ? verdict.summary : stalled ? 'This check couldn’t finish. Nothing was decided and the money is still held. Submit again to re-run it.' : 'Probes run first: layout, exact copy, status, console, accessibility, the repository. Claude only judges what they can’t settle.' }}
         </p>
-        <p v-if="live && meta.stage" class="report__stage"><span class="vk-spin" /> {{ STAGE[meta.stage] || 'Checking' }}</p>
+        <p v-if="live && meta.stage" class="report__stage">
+          <span class="vk-spin" />
+          <span>{{ stageLine }}<template v-if="recordingNow"> · Recording · <span class="vk-num">{{ clock(elapsed) }}</span></template><template v-else-if="replayingSample && meta.step !== 'open'"> · from the sample’s Kernel recording</template></span>
+        </p>
+        <!-- what Claude is being shown beside the evidence: the similar checks found in the 'precedent' stage -->
+        <!-- found or none only when the search answered; the demo's are sample checks; never a claim when it failed -->
+        <p v-if="live && meta.stage === 'model' && meta.precedent && liveSeen" class="report__seen">
+          <template v-if="liveSeen === 'sample'">Compared with <span class="vk-num">{{ meta.precedent.cases }}</span> sample check{{ meta.precedent.cases === 1 ? '' : 's' }} from the demo’s history</template>
+          <template v-else-if="liveSeen === 'found'">Compared with <span class="vk-num">{{ meta.precedent.cases }}</span> similar check{{ meta.precedent.cases === 1 ? '' : 's' }} on other contracts</template>
+          <template v-else-if="liveSeen === 'none'">No similar checks on other contracts yet</template>
+          <template v-else>Couldn’t look up similar checks this time. Judged on this delivery’s evidence alone.</template>
+        </p>
         <div class="report__links">
-          <a v-if="submission.liveUrl" :href="submission.liveUrl" target="_blank" rel="noopener"><Globe :size="13" :stroke-width="1.9" /> {{ hostOf(submission.liveUrl) }}</a>
+          <a v-if="submission.liveUrl" :href="submission.liveUrl" target="_blank" rel="noopener"><Globe :size="13" :stroke-width="1.9" /> {{ deliveryLabel(submission.liveUrl) }}</a>
           <a v-if="submission.repoUrl" :href="submission.repoUrl" target="_blank" rel="noopener"><Github :size="13" :stroke-width="1.9" /> {{ hostOf(submission.repoUrl) }}{{ submission.repoUrl.replace(/^https?:\/\/[^/]+/, '') }}</a>
           <span v-if="verdict" class="vk-faint">Confidence <span class="vk-num">{{ Math.round(verdict.confidence * 100) }}%</span></span>
         </div>
@@ -110,18 +216,43 @@ function agreement(r) {
         <span class="vk-num">{{ tokensLabel(engine.tokens) }}</span> ·
         <span class="vk-num">{{ ((engine.ms?.total || 0) / 1000).toFixed(1) }} s</span> ·
         <span class="vk-num">{{ engine.probes?.run || 0 }}</span> probes
-        <span v-if="engine.receipt" class="engine__receipt">· receipt <VCopy :value="engine.receipt" label="Copy the verdict receipt (sha-256 of the specs, the evidence and the results)">{{ engine.receipt.slice(0, 12) }}</VCopy></span>
+        <span v-if="seen && PREC_FOUND.includes(seen.status) && seen.asked?.length">· <template v-if="seen.cases">compared with <span class="vk-num">{{ seen.cases }}</span> {{ seen.status === 'sample' ? 'sample' : 'similar' }} check{{ seen.cases === 1 ? '' : 's' }}</template><template v-else>no similar checks yet</template></span>
+        <span v-else-if="seen && PREC_DOWN.includes(seen.status)">· precedent unavailable</span>
+        <span v-if="engine.receipt" class="engine__receipt">· receipt <VCopy :value="engine.receipt" :label="receiptLabel">{{ engine.receipt.slice(0, 12) }}</VCopy></span>
       </p>
+      <p v-if="whereLine" class="engine__where">{{ whereLine }}</p>
     </div>
 
-    <!-- the verifier's browser session, recorded on Kernel -->
-    <button v-if="replay" type="button" class="replay" @click="watching = true">
-      <span class="replay__play" aria-hidden="true"><Play :size="14" :stroke-width="2" /></span>
-      <span class="replay__text">
-        <span class="replay__title">Watch what the verifier saw</span>
-        <span class="vk-faint">{{ replay.sample ? 'Example recording · ' : '' }}<span class="vk-num">{{ replay.seconds }} s</span> · desktop, phone and the pages the checks named · recorded on Kernel</span>
-      </span>
-    </button>
+    <!-- the verifier's browser session, recorded in Kernel's cloud: chapters, where checks failed, one click to the second -->
+    <div v-if="replay" class="rp-card">
+      <!-- the poster repeats the title button for the pointer; keyboard and screen readers use the title -->
+      <button type="button" class="rp-card__poster" tabindex="-1" aria-hidden="true" @click="openAt(null)">
+        <img v-if="poster" :src="poster" alt="" loading="lazy" />
+        <span class="rp-card__play"><Play :size="13" :stroke-width="2" /></span>
+      </button>
+      <div class="rp-card__body">
+        <div class="rp-card__top">
+          <button type="button" class="rp-card__title" @click="openAt(null)">Watch what the verifier saw</button>
+          <span v-if="seconds" class="vk-num rp-card__len">{{ clock(seconds) }}</span>
+        </div>
+        <p class="rp-card__sub">{{ cardSub }}</p>
+        <div v-if="bar.length" class="rp-bar" role="group" aria-label="Chapters">
+          <button
+            v-for="c in bar" :key="`${c.kind}-${c.t}`" type="button" class="rp-bar__seg"
+            :style="{ flex: `${c.grow} 1 0px` }" :aria-label="`Play from ${c.label} at ${clock(c.t)}`" :data-tip="`${chapterShort(c)} · ${clock(c.t)}`" data-tip-pos="top" @click="openAt(c.t)"
+          />
+          <span v-for="(x, i) in ticks" :key="`tick-${i}`" class="rp-bar__tick" :style="{ left: `${x}%` }" aria-hidden="true" />
+        </div>
+        <p v-if="failLinks.length" class="rp-card__fails">
+          {{ failedOnCamera.length }} check{{ failedOnCamera.length > 1 ? 's' : '' }} failed on camera:
+          <template v-for="(m, i) in failLinks" :key="`${m.label}@${m.t}`">
+            <button type="button" class="rp-card__at" :aria-label="`Watch ${m.label} at ${clock(m.t)}`" @click="openAt(m.t)">{{ chapterShort(m) }} <span class="vk-num">{{ clock(m.t) }}</span></button><template v-if="i < failLinks.length - 1"> · </template>
+          </template>
+        </p>
+      </div>
+    </div>
+    <!-- no video this time: why, without a button -->
+    <p v-else-if="unrecorded" class="rp-none"><VideoOff :size="14" :stroke-width="1.9" aria-hidden="true" /> {{ unrecorded }}</p>
 
     <!-- integrity: the delivery tried to talk to the verifier -->
     <section v-if="verdict?.integrity" class="vk-card vk-card--pill vk-card--tone-danger integrity" role="alert">
@@ -146,11 +277,16 @@ function agreement(r) {
             <p class="report__statement">{{ r.criterion.statement }}</p>
             <span v-if="r.layer" class="by" :class="`by--${r.layer}`" :title="LAYER[r.layer]?.long">{{ LAYER[r.layer]?.short || r.layer }}</span>
           </div>
-          <p v-if="verdict && agreement(r)" class="report__prec" :class="{ 'is-odd': !agreement(r).consistent }">
-            {{ agreement(r).consistent ? 'Consistent with' : 'Differs from' }} <span class="vk-num">{{ agreement(r).consistent ? agreement(r).same : agreement(r).total - agreement(r).same }} of {{ agreement(r).total }}</span> similar checks on other deliveries<template v-if="!agreement(r).consistent">: the explanation says why</template>
-          </p>
+          <!-- a failed check says what to fix first; its precedent supports it below -->
           <p v-if="verdict && !r.passed" class="report__why">{{ r.explanation }}</p>
           <p v-else-if="r.state === 'running'" class="report__doing vk-faint">{{ r.criterion.method || 'Checking…' }}</p>
+          <!-- precedent: on every row Claude judged (or reused), passed or not, without opening the evidence. A failed
+               row's explanation is already above, so a departure's "Why" falls back to it only on a passed row -->
+          <PrecedentLine
+            v-if="verdict && ['model', 'reused'].includes(r.layer)"
+            :criterion-id="r.criterionId" :item="precedentOf(r)" :passed="r.passed" :explanation="r.passed ? (r.explanation || '') : ''" :layer="r.layer"
+            :meta="seen" :asked="!!seen?.asked?.includes(r.criterionId)" :default-open="!r.passed && wide"
+          />
 
           <!-- the probes, measured -->
           <!-- a single decisive probe is already the explanation above -->
@@ -162,28 +298,30 @@ function agreement(r) {
             </li>
           </ul>
 
-          <div v-if="verdict && r.evidence?.length && !r.passed" class="report__evidence">
+          <div v-if="verdict && hasEvidence(r) && !r.passed" class="report__evidence">
             <template v-for="(e, k) in r.evidence" :key="k">
               <button v-if="e.type === 'screenshot'" type="button" class="shot" @click="zoom = e">
                 <img :src="e.url" :alt="e.label" loading="lazy" />
                 <span class="shot__label">{{ e.label }}</span>
               </button>
-              <figure v-else-if="e.type === 'precedent'" class="prec">
-                <figcaption class="vk-eyebrow">{{ e.label }}</figcaption>
-                <ul class="prec__list">
-                  <li v-for="(p, j) in e.items" :key="j" :class="p.met ? 'is-pass' : 'is-fail'">
-                    <span class="probes__mark" aria-hidden="true"><Check v-if="p.met" :size="11" :stroke-width="2.6" /><X v-else :size="11" :stroke-width="2.6" /></span>
-                    <span>{{ p.statement }}<span v-if="p.reason" class="vk-faint"> — {{ p.reason }}</span></span>
-                  </li>
-                </ul>
-              </figure>
+              <!-- a moment in the recording: a chip to the second it was measured (nothing without a video); never a log box -->
+              <template v-else-if="e.type === 'moment'">
+                <template v-if="replay">
+                  <button type="button" class="moment" :aria-label="`Watch the moment this was measured, at ${clock(e.t)}, ${e.label}`" @click="openAt(e.t)">
+                    <Play :size="12" :stroke-width="2" aria-hidden="true" /> Watch <span class="vk-num">{{ clock(e.t) }}</span> · {{ e.label }}
+                  </button>
+                  <span class="moment__break" aria-hidden="true" />
+                </template>
+              </template>
+              <!-- precedent: shown by the row's PrecedentLine, never as a box here -->
+              <template v-else-if="e.type === 'precedent'" />
               <figure v-else class="log">
                 <figcaption class="vk-eyebrow">{{ e.label }}</figcaption>
                 <pre class="vk-num">{{ e.text }}</pre>
               </figure>
             </template>
           </div>
-          <details v-if="verdict && r.passed && (r.evidence?.length || r.probes?.length)" class="report__more">
+          <details v-if="verdict && r.passed && (hasEvidence(r) || r.probes?.length)" class="report__more">
             <summary>{{ r.probes?.length ? `${r.probes.length} probe${r.probes.length > 1 ? 's' : ''} and evidence` : 'Evidence' }}</summary>
             <ul v-if="r.probes?.length" class="probes">
               <li v-for="(p, k) in r.probes" :key="k" :class="`is-${p.status}`">
@@ -192,21 +330,21 @@ function agreement(r) {
                 <span class="probes__obs">{{ p.observed }}</span>
               </li>
             </ul>
-            <div class="report__evidence">
+            <div v-if="hasEvidence(r)" class="report__evidence">
               <template v-for="(e, k) in r.evidence" :key="k">
                 <button v-if="e.type === 'screenshot'" type="button" class="shot" @click="zoom = e">
                   <img :src="e.url" :alt="e.label" loading="lazy" />
                   <span class="shot__label">{{ e.label }}</span>
                 </button>
-                <figure v-else-if="e.type === 'precedent'" class="prec">
-                  <figcaption class="vk-eyebrow">{{ e.label }}</figcaption>
-                  <ul class="prec__list">
-                    <li v-for="(p, j) in e.items" :key="j" :class="p.met ? 'is-pass' : 'is-fail'">
-                      <span class="probes__mark" aria-hidden="true"><Check v-if="p.met" :size="11" :stroke-width="2.6" /><X v-else :size="11" :stroke-width="2.6" /></span>
-                      <span>{{ p.statement }}<span v-if="p.reason" class="vk-faint"> — {{ p.reason }}</span></span>
-                    </li>
-                  </ul>
-                </figure>
+                <template v-else-if="e.type === 'moment'">
+                  <template v-if="replay">
+                    <button type="button" class="moment" :aria-label="`Watch the moment this was measured, at ${clock(e.t)}, ${e.label}`" @click="openAt(e.t)">
+                      <Play :size="12" :stroke-width="2" aria-hidden="true" /> Watch <span class="vk-num">{{ clock(e.t) }}</span> · {{ e.label }}
+                    </button>
+                    <span class="moment__break" aria-hidden="true" />
+                  </template>
+                </template>
+                <template v-else-if="e.type === 'precedent'" />
                 <figure v-else class="log">
                   <figcaption class="vk-eyebrow">{{ e.label }}</figcaption>
                   <pre class="vk-num">{{ e.text }}</pre>
@@ -222,13 +360,7 @@ function agreement(r) {
       <img v-if="zoom" :src="zoom.url" :alt="zoom.label" class="zoom" />
     </VModal>
 
-    <VModal :open="watching" title="What the verifier saw" wide @close="watching = false">
-      <video v-if="watching && replay" :src="replay.url" class="replay__video" controls autoplay muted playsinline />
-      <p class="replay__note vk-faint">
-        <template v-if="replay?.sample">An example: a real recording of the verifier checking Verdikt's own site. Live verifications record their own.</template>
-        <template v-else>The whole check as it ran in Kernel's cloud browser: the page at 1440px and at 375px, then any pages the checks named. The screenshots and measurements in this report come from this session.</template>
-      </p>
-    </VModal>
+    <ReplayPlayer :open="watching" :replay="replay" :moments="moments" :start-at="startAt" :sub="playerSub" @close="watching = false" />
   </div>
 </template>
 
@@ -239,6 +371,8 @@ function agreement(r) {
 .report__attempt { font: var(--vk-type-small); }
 .report__text { margin: 8px 0 0; font: var(--vk-type-body); color: var(--vk-ink-2); }
 .report__stage { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; font: var(--vk-type-small); color: var(--vk-muted); }
+/* under the stage line, aligned with its text (the 16px spinner and its 8px gap) */
+.report__seen { margin: 2px 0 0 24px; font: var(--vk-type-small); color: var(--vk-faint); }
 .report__links { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; font: var(--vk-type-small); }
 .report__links a { display: inline-flex; align-items: center; gap: 5px; color: var(--vk-muted); }
 .report__links a:hover { color: var(--vk-ink); }
@@ -256,25 +390,52 @@ function agreement(r) {
 .engine__meta { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin: 0; font: var(--vk-type-small); }
 .engine__receipt { display: inline-flex; align-items: center; gap: 6px; }
 
-.replay {
-  display: flex; align-items: center; gap: 12px; width: 100%; margin-top: 14px; padding: 10px 14px 10px 10px; text-align: left;
-  border: 1px solid var(--vk-line); border-radius: var(--vk-r-md, 12px); background: var(--vk-surface); cursor: pointer;
-  transition: border-color var(--vk-dur-1);
+.engine__where { margin: 0; font: var(--vk-type-small); color: var(--vk-faint); }
+
+/* the recording: poster, title and length, the chapters as a rail, and where checks failed on camera */
+.rp-card { display: flex; gap: 14px; margin-top: 14px; padding: 12px 14px; border: 1px solid var(--vk-line); border-radius: var(--vk-r-md); background: var(--vk-surface); }
+.rp-card__poster {
+  position: relative; flex: none; display: grid; place-items: center; width: 112px; height: 70px; padding: 0; overflow: hidden;
+  border: 1px solid var(--vk-line); border-radius: var(--vk-r-xs); background: var(--vk-surface-2); cursor: pointer;
 }
-.replay:hover { border-color: var(--vk-line-strong); }
-.replay:focus-visible { outline: 2px solid var(--vk-focus); outline-offset: 2px; }
-.replay__play { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--vk-accent); color: var(--vk-on-accent); }
-.replay__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; font: var(--vk-type-small); }
-.replay__title { font: var(--vk-type-dense); color: var(--vk-ink); }
-.replay__video { display: block; width: 100%; max-height: 70vh; border-radius: var(--vk-r-sm); background: #000; }
-.replay__note { margin: 10px 0 0; font: var(--vk-type-small); }
-.report__prec { margin: 4px 0 0; font: var(--vk-type-small); color: var(--vk-muted); }
-.report__prec.is-odd { color: var(--vk-warn-ink, var(--vk-ink-2)); }
-.prec { flex-basis: 100%; margin: 0; padding: 10px 12px; border: 1px solid var(--vk-line); border-radius: var(--vk-r-sm); background: var(--vk-surface); }
-.prec__list { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font: var(--vk-type-small); color: var(--vk-ink-2); }
-.prec__list li { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 8px; }
-.prec__list .is-pass .probes__mark { color: var(--vk-ok-ink); border-color: color-mix(in srgb, var(--vk-ok) 35%, transparent); }
-.prec__list .is-fail .probes__mark { color: var(--vk-danger-ink); border-color: color-mix(in srgb, var(--vk-danger) 35%, transparent); }
+.rp-card__poster img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.rp-card__play { position: relative; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--vk-accent); color: var(--vk-on-accent); }
+.rp-card__play svg { margin-left: 2px; }
+.rp-card__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.rp-card__top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.rp-card__title { padding: 0; border: 0; background: none; cursor: pointer; text-align: left; font: var(--vk-type-dense); color: var(--vk-ink); }
+.rp-card__title:hover { text-decoration: underline; text-underline-offset: 3px; }
+.rp-card__len { flex: none; font-size: 12px; color: var(--vk-muted); }
+.rp-card__sub { margin: 0; font: var(--vk-type-small); color: var(--vk-faint); }
+/* each chapter is a 24px-tall target (WCAG 2.5.8) drawing a 6px bar in its middle */
+.rp-bar { position: relative; display: flex; gap: 1px; margin: -3px 0 -7px; }
+.rp-bar__seg { position: relative; min-width: 4px; height: 24px; padding: 0; border: 0; background: none; cursor: pointer; }
+.rp-bar__seg::before { content: ''; position: absolute; left: 0; right: 0; top: 9px; height: 6px; border-radius: var(--vk-r-full); background: var(--vk-line); transition: background var(--vk-dur-1); }
+.rp-bar__seg:hover::before, .rp-bar__seg:focus-visible::before { background: var(--vk-line-strong); }
+/* the last chapter's tip hangs left from its right edge, so a hidden tip never widens a phone's page */
+.rp-bar__seg:last-of-type::after { left: auto; right: 0; transform: translate(0, 4px); }
+.rp-bar__seg:last-of-type:hover::after, .rp-bar__seg:last-of-type:focus-visible::after { transform: none; }
+.rp-bar__tick { position: absolute; top: 7px; width: 2px; height: 10px; margin-left: -1px; border-radius: 1px; background: var(--vk-danger); pointer-events: none; }
+.rp-card__fails { margin: 2px 0 0; font: var(--vk-type-small); color: var(--vk-muted); }
+.rp-card__at { padding: 0; border: 0; background: none; cursor: pointer; font: inherit; color: var(--vk-ink-2); text-decoration: underline; text-underline-offset: 3px; }
+.rp-card__at:hover { color: var(--vk-ink); }
+.rp-card__at .vk-num { font-size: 12px; }
+.rp-none { display: flex; align-items: center; gap: 8px; margin: 14px 0 0; font: var(--vk-type-small); color: var(--vk-faint); }
+.rp-none svg { flex: none; }
+
+/* a check's moment in the recording */
+.moment {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px;
+  border: 1px solid var(--vk-line); border-radius: var(--vk-r-full); background: var(--vk-surface); cursor: pointer;
+  font: var(--vk-type-small); color: var(--vk-muted); white-space: nowrap; transition: border-color var(--vk-dur-1);
+}
+.moment:hover { border-color: var(--vk-line-strong); color: var(--vk-ink); }
+.moment .vk-num { font-size: 12px; }
+.moment__break { flex-basis: 100%; height: 0; }
+@media (max-width: 560px) {
+  .rp-card__poster { width: 88px; height: 55px; }
+  .moment { white-space: normal; height: auto; min-height: 26px; }
+}
 .integrity { margin-top: 16px; }
 .integrity__body { padding: 14px 16px 14px 18px; }
 .integrity__title { display: flex; align-items: center; gap: 8px; margin: 0; font: 400 15px/20px var(--vk-font); color: var(--vk-danger-ink); }

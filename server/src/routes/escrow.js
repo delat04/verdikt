@@ -86,6 +86,10 @@ export default async function escrowRoutes(app) {
     const m = await milestoneFor(request, reply, { role: 'client' })
     if (!m) return
     if (m.status !== 'failed') return reply.code(409).send({ error: 'Refunds need a failed verdict' })
+    // a check that stopped on the verifier's side (a lost browser, an error) leaves 'failed' with no verdict:
+    // nothing was decided about the delivery, so it gives the client no refund the freelancer could lose by
+    const { data: last } = await db().from('submissions').select('id, verdicts(id)').eq('milestone_id', m.id).order('attempt', { ascending: false }).limit(1).maybeSingle()
+    if (!last?.verdicts?.length) return reply.code(409).send({ error: 'This check didn’t finish, so there’s no verdict to refund on. The freelancer can submit again to re-run it.' })
     await refund({ ...m, contract_id: m.contract.id }, 'client')
     return { status: 'refunded' }
   })

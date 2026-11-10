@@ -73,7 +73,9 @@ function onSheetKey(e) {
 </script>
 
 <template>
-  <nav class="bar" :class="{ 'is-shown': props.shown && !open, 'is-dark': props.dark }" aria-label="Sections">
+  <!-- inert while slid away, so Tab doesn't walk through an invisible bar (not tied to `open`: the sheet
+       traps focus itself, and focus has to return to this bar's Menu button when the sheet closes) -->
+  <nav class="bar" :class="{ 'is-shown': props.shown && !open, 'is-dark': props.dark }" :inert="!props.shown" aria-label="Sections">
     <ul class="bar__links">
       <li v-for="l in LINKS.slice(0, 3)" :key="l.hash"><a :href="l.hash" @click.prevent="emit('go', l.hash)">{{ l.label }}</a></li>
     </ul>

@@ -4,6 +4,7 @@ import cors from '@fastify/cors'
 import fastifyStatic from '@fastify/static'
 import { config } from './config.js'
 import { PayPalError } from './lib/paypal.js'
+import { healthReport } from './lib/health.js'
 import contractRoutes, { inviteRoutes } from './routes/contracts.js'
 import escrowRoutes from './routes/escrow.js'
 import deliveryRoutes from './routes/delivery.js'
@@ -28,6 +29,8 @@ import { syncDisputes } from './agent/defense.js'
 import { resumeVerifications } from './agent/verify.js'
 import { resumeAppeals } from './agent/appeal.js'
 import { resumeRooms } from './agent/negotiator.js'
+import { initPrecedent, syncRecent } from './lib/precedent.js'
+import { channel3Status } from './lib/channel3.js'
 
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL || 'info' } })
 
@@ -53,7 +56,8 @@ app.setErrorHandler((error, request, reply) => {
   return reply.code(error.statusCode || 500).send({ error: error.message })
 })
 
-app.get('/health', async () => ({ ok: true, paypalEnv: config.paypal.env }))
+// one status object: each integration adds its own key in lib/health.js (states only, never a URL or a key)
+app.get('/health', async () => healthReport())
 
 await app.register(inviteRoutes, { prefix: '/api' })
 await app.register(contractRoutes, { prefix: '/api' })
@@ -109,6 +113,17 @@ const every = (ms, fn, label) => {
 every(30 * 60_000, renewHolds, 'hold renewal')
 every(30 * 60_000, closeEndedLimits, 'spending limit close')
 every(10 * 60_000, syncDisputes, 'dispute sync')
+
+// Precedent (Elastic): one line on where it stands (the v2 index is made only by `npm run precedent:sync --
+// --rebuild --yes`, never here), then catch up on whatever a failed write or an outage missed
+void initPrecedent(app.log)
+every(30 * 60_000, syncRecent, 'precedent sync')
+
+// Channel3: one line on how store search is set up (from env, no call)
+{
+  const c3 = channel3Status()
+  app.log.info(c3.on ? `channel3 on (REST v1, cap ${c3.cap}/month)` : `channel3 off: no CHANNEL3_API_KEY, anonymous MCP search only (cap ${c3.cap}/month)`)
+}
 
 // Work that a restart interrupted picks up where it left off: checks, second reviews, payouts in flight, expense claims
 Promise.all([resumeVerifications(), resumeAppeals(), resumePayouts(), resumeRooms(), resumeExpenses()])

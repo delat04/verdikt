@@ -1,0 +1,162 @@
+{
+ "products": [
+  {
+   "id": "Rcq3ctM",
+   "title": "2D Barcode Scanner",
+   "brands": [
+    {
+     "id": "krXc",
+     "name": "Netum"
+    }
+   ],
+   "category": {
+    "slug": "handheld-barcode-scanners",
+    "title": "Handheld Barcode Scanners",
+    "path": [
+     {
+      "slug": "electronics",
+      "title": "Electronics"
+     },
+     {
+      "slug": "electronics-accessories",
+      "title": "Electronics Accessories"
+     },
+     {
+      "slug": "computer-components",
+      "title": "Computer Components"
+     },
+     {
+      "slug": "input-devices",
+      "title": "Input Devices"
+     },
+     {
+      "slug": "barcode-scanners",
+      "title": "Barcode Scanners"
+     },
+     {
+      "slug": "handheld-barcode-scanners",
+      "title": "Handheld Barcode Scanners"
+     }
+    ],
+    "has_children": false
+   },
+   "images": [
+    {
+     "cleaned_url": "https://cdn.trychannel3.com/99ab7bd3-7307-46ea-b2ab-269e1c9113a2",
+     "is_main_image": true,
+     "alt_text": "Black handheld barcode scanner with stand and coiled USB cable on white background."
+    }
+   ],
+   "offers": [
+    {
+     "url": "https://buy.trychannel3.com/Rcq3ctM-BsaX-Bk810O",
+     "domain": "walmart.com",
+     "price": {
+      "price": 34.2,
+      "compare_at_price": 38,
+      "currency": "USD"
+     },
+     "availability": "InStock",
+     "condition": "new",
+     "max_commission_rate": 0.07,
+     "dimensions": null
+    }
+   ]
+  },
+  {
+   "id": "BadJs01",
+   "title": "Scanner BadJs01",
+   "offers": [
+    {
+     "url": "javascript:alert(1)",
+     "domain": "walmart.com",
+     "price": {
+      "price": 34.2,
+      "compare_at_price": 38,
+      "currency": "USD"
+     },
+     "availability": "InStock",
+     "condition": "new",
+     "max_commission_rate": 0.07,
+     "dimensions": null
+    }
+   ]
+  },
+  {
+   "id": "BadHttp1",
+   "title": "Scanner BadHttp1",
+   "offers": [
+    {
+     "url": "http://buy.trychannel3.com/x",
+     "domain": "walmart.com",
+     "price": {
+      "price": 34.2,
+      "compare_at_price": 38,
+      "currency": "USD"
+     },
+     "availability": "InStock",
+     "condition": "new",
+     "max_commission_rate": 0.07,
+     "dimensions": null
+    }
+   ]
+  },
+  {
+   "id": "BadEur01",
+   "title": "Scanner BadEur01",
+   "offers": [
+    {
+     "url": "https://buy.trychannel3.com/Rcq3ctM-BsaX-Bk810O",
+     "domain": "walmart.com",
+     "price": {
+      "price": 30,
+      "currency": "EUR"
+     },
+     "availability": "InStock",
+     "condition": "new",
+     "max_commission_rate": 0.07,
+     "dimensions": null
+    }
+   ]
+  },
+  {
+   "id": "BadDom01",
+   "title": "Scanner BadDom01",
+   "offers": [
+    {
+     "url": "https://buy.trychannel3.com/Rcq3ctM-BsaX-Bk810O",
+     "domain": "",
+     "price": {
+      "price": 34.2,
+      "compare_at_price": 38,
+      "currency": "USD"
+     },
+     "availability": "InStock",
+     "condition": "new",
+     "max_commission_rate": 0.07,
+     "dimensions": null
+    }
+   ]
+  },
+  {
+   "id": "BadOos01",
+   "title": "Scanner BadOos01",
+   "offers": [
+    {
+     "url": "https://buy.trychannel3.com/Rcq3ctM-BsaX-Bk810O",
+     "domain": "walmart.com",
+     "price": {
+      "price": 34.2,
+      "compare_at_price": 38,
+      "currency": "USD"
+     },
+     "availability": "OutOfStock",
+     "condition": "new",
+     "max_commission_rate": 0.07,
+     "dimensions": null
+    }
+   ]
+  }
+ ],
+ "next_page_token": null
+}

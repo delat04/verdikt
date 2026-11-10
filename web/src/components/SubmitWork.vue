@@ -30,9 +30,19 @@ const valid = computed(() => isUrl(liveUrl.value) && (!repoUrl.value || isUrl(re
 // a pre-check describes one URL: change it and the result no longer applies
 watch([liveUrl, repoUrl], () => { if (pre.value && (pre.value.liveUrl !== liveUrl.value.trim() || (pre.value.repoUrl || '') !== repoUrl.value.trim())) pre.value = null })
 
+// The sample pages are Northbrew's café landing page and coffee shop, so they stand in for a delivery only when every
+// signed check is a standard one those pages can answer. Any other check (a QR code, a staff scan page) would pass
+// on a page that has none, and its recording would show that.
+const SAMPLE_CHECKS = /^(The live URL serves .* with no errors|Above the fold shows the headline|No horizontal scrolling at 375px|The signup form accepts a valid email|A product can be added to the cart|Largest Contentful Paint under|All copy from the brief is present|The repository has a README)/
+const sampleFits = computed(() => !!props.milestone.criteria?.length && props.milestone.criteria.every((c) => SAMPLE_CHECKS.test(c.statement)))
+
 function sample(kind) {
   const slug = props.milestone.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-  liveUrl.value = { complete: `https://${slug}.vercel.app`, tampered: `https://${slug}-tampered.vercel.app` }[kind] || `https://${slug}-incomplete.vercel.app`
+  // the demo's sample deliveries are real pages Verdikt serves, each with a recording made on Kernel (services/replays.json);
+  // a milestone they can't answer gets made-up URLs instead, and its verdict says there's no recording
+  liveUrl.value = isDemo && sampleFits.value
+    ? `${location.origin}/samples/${{ complete: 'northbrew-shop-v2', tampered: 'northbrew-shop-tampered' }[kind] || 'northbrew-shop-v1'}.html`
+    : { complete: `https://${slug}.vercel.app`, tampered: `https://${slug}-tampered.vercel.app` }[kind] || `https://${slug}-incomplete.vercel.app`
   repoUrl.value = `https://github.com/okafor-studio/${slug}`
   notes.value = {
     complete: 'Fixed the mobile layout and the signup endpoint.',

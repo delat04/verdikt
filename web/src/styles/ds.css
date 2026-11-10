@@ -373,6 +373,17 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   background: var(--vk-surface); box-shadow: var(--vk-elev-modal);
 }
 .vk-modal--wide { width: min(100%, 640px); }
+.vk-modal:focus { outline: none; }   /* focus lands on the dialog itself only when nothing inside can take it */
+/* theater: the video stage — wide on a desktop, the whole screen on a phone. Only the body scrolls: the title and
+   Close stay at the top and the foot (the recording's custody facts) at the bottom */
+.vk-modal--theater { width: min(100%, 1120px); display: flex; flex-direction: column; overflow: hidden; }
+.vk-modal--theater > :is(.vk-modal__head, .vk-modal__foot) { flex: none; }
+.vk-modal--theater > .vk-modal__body { flex: 1 1 auto; min-height: 0; overflow: auto; }
+@media (max-width: 640px) {
+  .vk-scrim:has(> .vk-modal--theater) { padding: 0; }
+  .vk-modal--theater { width: 100%; height: 100dvh; max-height: 100dvh; border-radius: 0; border: 0; }
+  .vk-modal--theater :is(.vk-modal__head, .vk-modal__body, .vk-modal__foot) { padding-left: var(--vk-sp-4); padding-right: var(--vk-sp-4); }
+}
 .vk-modal__head { display: flex; align-items: flex-start; gap: var(--vk-sp-3); padding: var(--vk-sp-6) var(--vk-sp-6) 0; }
 .vk-modal__title { flex: 1; margin: 0; font: var(--vk-type-section); }
 .vk-modal__sub { margin: 4px 0 0; font: var(--vk-type-dense); color: var(--vk-muted); }

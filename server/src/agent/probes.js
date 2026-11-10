@@ -187,6 +187,8 @@ const RUN = {
     for (const vp of viewsOf(p, 'both')) {
       const v = f.site.views[vp]
       if (!v) return r('unknown', `The ${vp} view was not captured.`)
+      // the verifier's own browser went away: that says nothing about the site (inspectSite retries before this)
+      if (v.infra) return r('unknown', `The verifier’s browser stopped before the ${VIEWPORT_PX[vp]}px view loaded.`)
       if (v.error) return r('fail', `At ${VIEWPORT_PX[vp]}px the page did not load: ${v.error}.`, { fix: 'Make sure the live URL is public and responds.' })
       if (v.status >= 400) return r('fail', `At ${VIEWPORT_PX[vp]}px the server answered HTTP ${v.status}.`, { fix: 'The live URL must answer with a 2xx status.' })
     }

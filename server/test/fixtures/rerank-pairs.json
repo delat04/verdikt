@@ -1,0 +1,29 @@
+{
+  "about": "Labelled pairs for npm run precedent:calibrate. Each query is a check statement as the index stores it (already redacted). A match is the same check worded another way: the same thing measured, under the same condition. A non-match is a different check on the same kind of page. Variants that differ in one parameter (375px and 1440px, mobile and desktop) are left out on purpose: the reranker scores them as close, and the case line shows both statements so either side can see the difference.",
+  "pairs": [
+    { "query": "No horizontal scrolling at 375px wide", "text": "At 375px wide nothing is wider than the screen, so the page never scrolls sideways.", "match": true },
+    { "query": "No horizontal scrolling at 375px wide", "text": "At 375px wide the headline and the contact email are readable.", "match": false },
+    { "query": "The repository has a README", "text": "The public GitHub repository contains a README that explains how to run the project.", "match": true },
+    { "query": "The repository has a README", "text": "The repository contains the page source code.", "match": false },
+    { "query": "The page has a meta description for search engines", "text": "The home page sets a meta description tag that search results can show.", "match": true },
+    { "query": "The page has a meta description for search engines", "text": "The page has a favicon and a title.", "match": false },
+    { "query": "The live URL loads without errors on desktop (1440px) and mobile (375px)", "text": "The live URL loads with a 200 status and shows no console errors.", "match": true },
+    { "query": "The live URL loads without errors on desktop (1440px) and mobile (375px)", "text": "No horizontal scrolling at 375px wide", "match": false },
+    { "query": "The page shows a contact email address as a clickable mailto: link", "text": "A contact email is shown on the page and opens the mail app when clicked.", "match": true },
+    { "query": "The page shows a contact email address as a clickable mailto: link", "text": "The signup form shows a confirmation message.", "match": false },
+    { "query": "Submitting the signup form shows a confirmation message", "text": "After a valid email is entered, the signup form shows a message confirming the subscription.", "match": true },
+    { "query": "Submitting the signup form shows a confirmation message", "text": "The page shows a contact email address.", "match": false },
+    { "query": "The largest contentful paint is under 2.5 s on mobile", "text": "On a phone the main content paints in less than 2.5 seconds.", "match": true },
+    { "query": "The largest contentful paint is under 2.5 s on mobile", "text": "The live URL loads without errors.", "match": false },
+    { "query": "Every image has alt text", "text": "All images on the page have a descriptive alt attribute.", "match": true },
+    { "query": "Every image has alt text", "text": "The heading is readable on both sizes.", "match": false },
+    { "query": "The menu page lists every dish with its price", "text": "Each item on the menu page shows what it costs.", "match": true },
+    { "query": "The menu page lists every dish with its price", "text": "The navigation links to the menu.", "match": false },
+    { "query": "The navigation links to the menu, story and contact sections", "text": "The header has working links that jump to the menu, story and contact sections.", "match": true },
+    { "query": "The navigation links to the menu, story and contact sections", "text": "The story section has at least two sentences.", "match": false },
+    { "query": "The page has no serious or critical accessibility violations", "text": "An axe-core scan finds no serious or critical accessibility issues.", "match": true },
+    { "query": "The page has no serious or critical accessibility violations", "text": "The live URL loads with a 200 status.", "match": false },
+    { "query": "The story section has at least two sentences about the business, with no placeholder text", "text": "The page has a story section of two or more sentences about the business and no lorem ipsum.", "match": true },
+    { "query": "The story section has at least two sentences about the business, with no placeholder text", "text": "The page shows opening hours for every day of the week.", "match": false }
+  ]
+}

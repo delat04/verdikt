@@ -47,6 +47,7 @@ import {
   nextStep, roleOf, counterparty, currentMilestone, contractTotals, termsSigned, latestSubmission, latestAppeal, holdHealth, PAYOUT,
 } from '@/domain/milestone'
 import { expenseTotals, holdCents } from '@/domain/expenses'
+import { itemName } from '@/domain/expenseRules'
 
 const props = defineProps({ id: { type: String, required: true } })
 const auth = useAuthStore()
@@ -174,6 +175,8 @@ const appeal = () => run('appeal', () => api.appeal(ms.value.id, appealReason.va
 
 // ---- releasing: all of it, or part (the rest of the hold goes back to the client)
 const verdictNow = computed(() => sub.value?.verdict)
+// the check stopped on the verifier's side (a lost browser, an error): 'failed' with no verdict, nothing decided
+const stalled = computed(() => ms.value?.status === 'failed' && !!sub.value && !sub.value.verdict && !ms.value.progress)
 const met = computed(() => verdictNow.value?.results.filter((r) => r.passed).length ?? 0)
 const suggestedCents = computed(() => (ms.value && verdictNow.value?.results.length
   ? Math.max(100, Math.round((ms.value.amountCents * met.value) / verdictNow.value.results.length)) : ms.value?.amountCents || 0))
@@ -292,7 +295,7 @@ watch(showExpenses, (on) => { if (!on && tab.value === 'expenses') tab.value = s
               :variant="step.actor === 'you' ? 'primary' : 'secondary'"
               size="lg"
               @click="act(step.action)"
-            >{{ ACTION[step.action].label }}</VButton>
+            >{{ step.actionLabel || ACTION[step.action].label }}</VButton>
             <VButton v-if="step.key === 'invite' && criteriaCount" variant="secondary" size="lg" @click="tab = 'checks'">Review checks</VButton>
           </NextStepCard>
 
@@ -433,10 +436,11 @@ watch(showExpenses, (on) => { if (!on && tab.value === 'expenses') tab.value = s
                   </template>
                 </section>
 
-                <VerdictReport :criteria="ms.criteria" :submission="sub" :progress="ms.progress" />
+                <VerdictReport :criteria="ms.criteria" :submission="sub" :progress="ms.progress" :stalled="stalled" />
 
-                <!-- held: what each side can do -->
-                <div v-if="ms.status === 'failed'" class="held">
+                <!-- held: what each side can do. A stalled check decided nothing, so there's nothing to void or appeal -->
+                <div v-if="stalled && role === 'client'" class="held"><p class="held__text">Nothing to decide yet: {{ other?.name ? firstName(other.name) : 'the freelancer' }} can submit again to re-run the check, and the money stays held until a verdict.</p></div>
+                <div v-else-if="ms.status === 'failed' && !stalled" class="held">
                   <template v-if="role === 'client'">
                     <p class="held__text">{{ firstName(other?.name || 'The freelancer') }} sees this report and can fix and resubmit. You can also decide yourself: release all of it or the share that's met, or void the hold.</p>
                     <div class="held__actions">
@@ -594,13 +598,22 @@ watch(showExpenses, (on) => { if (!on && tab.value === 'expenses') tab.value = s
 
       <VModal :open="modal === 'sign'" title="Sign the terms" sub="Your signature covers every milestone below." @close="modal = ''">
         <ul class="sign">
-          <li v-for="m in contract.milestones" :key="m.id">
-            <span>{{ m.position === contract.milestones.length && contract.milestones.length > 1 ? 'Final' : `M${m.position}` }} · {{ m.title }}</span>
-            <span class="vk-faint">{{ m.criteria.length }} checks</span>
-            <span class="vk-num">{{ money(m.amountCents, contract.currency) }}</span>
-          </li>
+          <template v-for="m in contract.milestones" :key="m.id">
+            <li>
+              <span>{{ m.position === contract.milestones.length && contract.milestones.length > 1 ? 'Final' : `M${m.position}` }} · {{ m.title }}</span>
+              <span class="vk-faint">{{ m.criteria.length }} checks</span>
+              <span class="vk-num">{{ money(m.amountCents, contract.currency) }}</span>
+            </li>
+            <!-- the expense budget and its shopping list are part of what's signed -->
+            <li v-if="m.expenseBudgetCents > 0" class="sign__xp">
+              <span>+ up to <span class="vk-num">{{ money(m.expenseBudgetCents, contract.currency) }}</span> for expenses ({{ (m.expenseCovers || []).join(', ') }})<template v-if="m.expenseProducts?.length"> · {{ m.expenseProducts.length }} item{{ m.expenseProducts.length === 1 ? '' : 's' }} on the shopping list</template></span>
+              <ul v-if="m.expenseProducts?.length" class="sign__items">
+                <li v-for="p in m.expenseProducts.slice(0, 6)" :key="p.id">{{ itemName(p) }} · {{ p.domain }} · <span class="vk-num">{{ money(p.priceCents, 'USD') }}</span></li>
+              </ul>
+            </li>
+          </template>
         </ul>
-        <p class="sign__note">When every check on a milestone passes, its held payment is released automatically. If any check fails, the money stays held and both of you see exactly why.</p>
+        <p class="sign__note">When every check on a milestone passes, its held payment is released automatically. If any check fails, the money stays held and both of you see exactly why. <span class="sign__share">Each check and how it was decided is shared, anonymised (this contract’s names, links, quotes and amounts removed), with the verifier on other Verdikt contracts, so similar work gets similar verdicts.</span></p>
         <template #foot>
           <VButton variant="secondary" @click="modal = ''; tab = 'checks'">Review checks first</VButton>
           <VButton :icon="PenLine" :loading="busy === 'sign'" :disabled="!!mySignature" @click="sign">Sign as {{ firstName(auth.name) }}</VButton>
@@ -803,7 +816,12 @@ watch(showExpenses, (on) => { if (!on && tab.value === 'expenses') tab.value = s
 .invite__note { margin: 16px 0 0; font: var(--vk-type-small); }
 .sign { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
 .sign li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 14px; font: var(--vk-type-dense); }
+.sign li.sign__xp { display: block; margin-top: -6px; padding-left: 14px; font: var(--vk-type-small); color: var(--vk-muted); }
+.sign__items { margin: 4px 0 0; padding: 0; list-style: none; }
+.sign .sign__items li { display: block; font: var(--vk-type-small); color: var(--vk-faint); overflow-wrap: anywhere; }
 .sign__note { margin: 18px 0 0; padding: 12px 14px; border-radius: var(--vk-r-sm); background: var(--vk-surface-2); border: 1px solid var(--vk-line-subtle); font: var(--vk-type-dense); color: var(--vk-ink-2); }
+/* the precedent disclosure: what signing shares with other contracts (Elastic precedent), on its own line */
+.sign__share { display: block; margin-top: 6px; }
 
 @media (max-width: 1100px) {
   .ms__tabs { top: 0; }

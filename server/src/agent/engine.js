@@ -20,17 +20,23 @@ const FORM_WORDS = /form|sign ?up|subscribe|newsletter|contact|waitlist/i
  * @param {object} p
  * @param {object} p.contract   { id, title, brief }
  * @param {Array}  p.criteria   rows from public.criteria (check_spec may be empty: it compiles once here)
- * @param {Function} [p.onStage] (stage, detail) while it runs: browser | probes | ocr
+ * @param {Function} [p.onStage] (stage, detail) while it runs: browser | probes | ocr. During 'browser', detail is the
+ *   browser's step from inspectSite ({ step, browser?, recording?, path? }); the other calls have none.
  * @param {boolean}  [p.record]  an official verification: the browser runs on Kernel and is recorded
+ * @param {string}   [p.ref]     what the run is for (the submission id): names and tags the Kernel session
+ * @param {string}   [p.kind]    'verify' for a recorded run, else 'precheck'
  */
-export async function runProbes({ contract, criteria, liveUrl, repoUrl, onStage = () => {}, record = false }) {
+export async function runProbes({ contract, criteria, liveUrl, repoUrl, onStage = () => {}, record = false, ref = '', kind = record ? 'verify' : 'precheck' }) {
   const t0 = Date.now()
   const specs = await ensureSpecs(contract, criteria)
   const plan = planFor([...specs.values()])
   plan.form ||= criteria.some((c) => FORM_WORDS.test(c.statement))
 
   await onStage('browser')
-  const [site, repo] = await Promise.all([inspectSite(liveUrl, plan, { record }), inspectRepo(repoUrl, { files: plan.repoFiles })])
+  const [site, repo] = await Promise.all([
+    inspectSite(liveUrl, plan, { record, ref, kind, onStep: (d) => onStage('browser', d) }),
+    inspectRepo(repoUrl, { files: plan.repoFiles }),
+  ])
   const facts = { site, repo }
   const ms = { collect: Date.now() - t0, ocr: 0 }
 
@@ -47,8 +53,12 @@ export async function runProbes({ contract, criteria, liveUrl, repoUrl, onStage 
   return { specs, facts, evals, flags: scanForInjection(site, repo), ms, plan }
 }
 
-/** What the facts were, as a hash: anyone holding the same evidence and specs gets the same receipt. */
-export function receiptOf(specs, facts, results) {
+/**
+ * What the facts were, as a hash: anyone holding the same evidence and specs gets the same receipt.
+ * precedentDigest: the hash of the precedent the model saw (precedent.js snapshotDigest), or null. Only a
+ * digest joins the hashed object, so a verdict without precedent keeps the original receipt formula.
+ */
+export function receiptOf(specs, facts, results, precedentDigest = null) {
   const views = Object.fromEntries(Object.entries(facts.site.views).map(([k, v]) => [k, {
     ...v, screenshot: v.screenshot ? sha(v.screenshot) : null, text: v.text ? sha(v.text) : null,
   }]))
@@ -56,7 +66,10 @@ export function receiptOf(specs, facts, results) {
     views, form: facts.site.form && { ...facts.site.form, screenshot: null }, subpages: facts.site.subpages, links: facts.site.links, axe: facts.site.axe,
     repo: facts.repo?.treeSha || facts.repo?.error || null, ocr: facts.ocr ? sha(JSON.stringify(facts.ocr)) : null,
   }))
-  return sha(JSON.stringify({ engine: ENGINE, specs: [...specs.entries()], digest, results: results.map((r) => [r.criterion_id, r.passed, r.layer]) }))
+  return sha(JSON.stringify({
+    engine: ENGINE, specs: [...specs.entries()], digest, results: results.map((r) => [r.criterion_id, r.passed, r.layer]),
+    ...(precedentDigest ? { precedent: precedentDigest } : {}),
+  }))
 }
 
 /**
