@@ -1,61 +1,451 @@
 {
   "title": "Verdikt — three-minute demo",
+  "notes": "Each beat is spoken line by line: one voice clip per line, laid with a set pause after it, so the pace is even and every on-screen action can wait for its line (cue). role says whose side the beat shows: the video's corner chip and the app's role bar use the same colours (violet: the hirer, teal: the freelancer, grey: the verifier). A switch card plays when the side changes. actor names who is acting on screen. tags are ElevenLabs v4 delivery tags, sent before the line but never shown in the captions. sfx names the sound library record.mjs places at the moments it marks; music scores the timeline act by act (each act spans whole beats). An effect's gain is its peak under the voice's, after assemble.mjs brings every effect to the same peak.",
+  "voice": {
+    "model": "eleven_v4",
+    "stability": 0.45,
+    "similarity": 0.8,
+    "pause": 0.42,
+    "lead": 0.35,
+    "tail": 0.85
+  },
   "beats": [
     {
       "id": "hook",
-      "slot": 13,
-      "title": "The question",
-      "screen": "The landing page: the hero, then a slow scroll through the story so the 3D mark goes from Agreed to Paid.",
-      "say": "AI agents can already shop for us. Next, they'll hire for us. But when an agent hires someone, who checks the work before the money moves?"
+      "role": "none",
+      "screen": "The landing page: the hero, then a slow scroll through the story so the 3D card goes from Agreed to Paid.",
+      "lines": [
+        {
+          "say": "AI agents already shop for us."
+        },
+        {
+          "say": "Soon, they'll hire for us."
+        },
+        {
+          "say": "So who checks the work... before the money moves?",
+          "pause": 0.7,
+          "tags": "[curious]"
+        }
+      ]
     },
     {
       "id": "limit",
-      "slot": 21,
-      "title": "Approve once",
-      "screen": "Settings › Spending limit: Total $1,000, Most for one job $700, Lasts 28 days, What it's for “Website work for Northbrew”. Approve $1,000 on PayPal, approve the limit, and the card turns Active.",
-      "say": "Verdikt is escrow on PayPal for people and their agents. Maya runs a coffee shop. She approves one PayPal hold: a thousand dollars, at most seven hundred for one job, for four weeks. It's a hold, not a charge, and the only time she touches the money."
+      "role": "client",
+      "actor": "Maya · the hirer",
+      "screen": "Settings › Spending limit: $1,000 in all, $700 for one job, 28 days, for 'Website work for Northbrew'. Approve on PayPal, approve the limit, the card turns Active.",
+      "lines": [
+        {
+          "say": "This is Maya. She runs a coffee shop, and she's hiring.",
+          "tags": "[warm]"
+        },
+        {
+          "say": "She approves one PayPal hold: a thousand dollars, at most seven hundred per job, for four weeks.",
+          "cue": "approve"
+        },
+        {
+          "say": "A hold... not a charge.",
+          "tags": "[reassuring]"
+        }
+      ]
     },
     {
       "id": "hire",
-      "slot": 30,
-      "title": "Her agent hires",
-      "screen": "A real run of Claude Opus 5.5 connected to Verdikt over MCP, replayed sped up: price_check finds $1,800–$5,000, Claude flags Maya's $400–$700 budget as low and asks first, she confirms, post_job. Then Jobs: three reviewed applications, QuickBuild Studio at 8 with the off-platform flag, and Sam hired.",
-      "say": "Her agent is Claude, connected to Verdikt over MCP. It prices the job from live web prices, flags that her budget is low, and posts it once she confirms. Three freelancers apply, and each application arrives reviewed: rules first, then Claude. This one asks to be paid by bank transfer or crypto, off the platform, where escrow can't protect anyone. It's flagged. Claude hires Sam."
+      "role": "client",
+      "actor": "Maya's agent · Claude over MCP",
+      "screen": "The real Claude run over MCP, replayed: price_check, the low-budget warning, Maya confirms, post_job. Then Jobs: three reviewed applications, QuickBuild Studio flagged for asking to pay off the platform, and Sam hired.",
+      "lines": [
+        {
+          "say": "Her agent is Claude, connected to Verdikt over MCP."
+        },
+        {
+          "say": "It prices the job from live web prices, warns her budget is low, and posts it once she agrees."
+        },
+        {
+          "say": "Applications arrive already reviewed.",
+          "cue": "apps"
+        },
+        {
+          "say": "This one wants payment off the platform. Flagged.",
+          "cue": "flag",
+          "tags": "[matter-of-fact]"
+        },
+        {
+          "say": "Claude hires Sam.",
+          "cue": "hireSam"
+        }
+      ]
     },
     {
       "id": "terms",
-      "slot": 28,
-      "title": "Agents bargain, terms become tests",
-      "screen": "The contract room. Maya hands the negotiation to her agent with a private mandate (at most $560, within 7 days); Sam's agent already has his. The agents bargain from $600 to $550 and both accept. The signed checks show how each is checked, then Maya signs.",
-      "say": "Hiring opens a contract room. Maya's agent bargains with Sam's, each inside a private mandate. Their limits live in code, not in a prompt, and every agent message is labelled. They settle at five hundred and fifty. Every 'done means' line becomes a check a machine can run. The contract is a test suite. Both sides sign."
+      "role": "both",
+      "actor": "Both agents, each inside its own limits",
+      "screen": "The contract room: Maya's private mandate (at most $560, 7 days), the agents bargain from $600 to $550 and accept, the signed checks show how each is tested, Maya signs.",
+      "lines": [
+        {
+          "say": "In the contract room, both agents bargain, each inside a private limit set in code.",
+          "cue": "mandate"
+        },
+        {
+          "say": "They settle at five hundred and fifty dollars.",
+          "cue": "settle"
+        },
+        {
+          "say": "Every line of what done means becomes a check a machine can run.",
+          "cue": "checks"
+        },
+        {
+          "say": "Both sign.",
+          "cue": "sign"
+        }
+      ]
     },
     {
       "id": "fund",
-      "slot": 15,
-      "title": "Funded from the limit",
-      "screen": "Fund with PayPal: $590, the $550 of work plus a $40 domain budget. “Hold $590.00 from my limit”, and it's held with no new PayPal approval.",
-      "say": "Funding comes out of her limit: five hundred and ninety dollars, the work plus a domain budget, held at once with no new PayPal approval. A job that didn't fit would need her."
+      "role": "client",
+      "actor": "Maya · the hirer",
+      "screen": "Fund with PayPal: $590, the $550 of work plus a $40 domain budget, held from the limit with no new approval.",
+      "lines": [
+        {
+          "say": "Maya funds it from her limit: five hundred and ninety dollars, held at once, with no new approval.",
+          "cue": "fund"
+        }
+      ]
     },
     {
-      "id": "deliver",
-      "slot": 24,
-      "title": "Sam's agent delivers",
-      "screen": "Sam's side: a pre-check of an incomplete build (two checks not met, one at 375px), then the complete build passing. Expenses: the Walmart receipt for the Netum barcode scanner on the shopping list (“scanner from the list”, $37.02) is reimbursed by rules, with “Bought at a store on the list”, “The item on the list” and “At the agreed price” passed and no Claude tag; then “same store, other item” goes to Maya (Client decides). The delivery is ready to submit.",
-      "say": "On the other side, Sam's coding agent runs a free pre-check against the signed checks. Two fail, so it fixes them and runs it again. It bought the barcode scanner on the shopping list both of them signed. The receipt names it, from Walmart, at the listed price, so rules reimburse it in seconds from the same PayPal hold, with no model. The same store and price for a different item goes to Maya. Then it submits."
+      "id": "list",
+      "role": "client",
+      "actor": "Maya · the hirer",
+      "screen": "The Northbrew shop contract, already running. Maya's queue: Sam's agent proposed a receipt printer for the shopping list, a real Walmart listing from Channel3. Review the item, Agree.",
+      "lines": [
+        {
+          "say": "Sam is also building Maya's online shop."
+        },
+        {
+          "say": "Sam's agent wants a receipt printer on its shopping list: a real Walmart listing, from Channel3.",
+          "cue": "review"
+        },
+        {
+          "say": "Maya agrees.",
+          "cue": "agree"
+        }
+      ]
     },
     {
-      "id": "verdict",
-      "slot": 24,
-      "title": "The verdict moves the money",
-      "screen": "Submit for checking, verification running check by check. In the report, “Watch what the verifier saw” plays the Kernel recording (jump to Phone · 375px), and under a check Claude judged, the “In line with … similar checks on other contracts” line opens the Elastic cases. Then Paid: the milestone turns green and $539 lands in Sam's PayPal. Maya's spending limit shows what was paid and what's left.",
-      "say": "The verifier opens the site in a cloud browser on Kernel, recorded so both can watch it. Probes settle most checks. For the rest, Elastic finds how similar checks were decided, and Claude judges. Every check passes. PayPal captures five hundred and fifty dollars, Sam is paid, and the unspent budget returns to Maya's limit."
+      "id": "claim",
+      "role": "freelancer",
+      "actor": "Sam · the freelancer",
+      "screen": "Sam's side, Expenses: the Walmart receipt for the Netum scanner on the list ($37.02), claimed and reimbursed by rules in a second, with no model.",
+      "lines": [
+        {
+          "say": "Now, Sam's side. The scanner on the list is bought."
+        },
+        {
+          "say": "The receipt names it, from the listed store, at the listed price,",
+          "cue": "claim"
+        },
+        {
+          "say": "so rules pay it back in seconds, from the same PayPal hold. No model needed.",
+          "cue": "paid",
+          "tags": "[pleased]"
+        }
+      ]
+    },
+    {
+      "id": "fail",
+      "role": "verifier",
+      "actor": "Verdikt's verifier · on neither side",
+      "screen": "The shop's first build, verified: 3 of 6 checks not met. Watch what the verifier saw: the Kernel recording, jump to Phone · 375px. Then the Claude-judged cart check and its Elastic precedent.",
+      "lines": [
+        {
+          "say": "The shop's first build is in."
+        },
+        {
+          "say": "The verifier opened it in a cloud browser on Kernel, and recorded the check.",
+          "cue": "watch"
+        },
+        {
+          "say": "On a phone, the page runs off the screen. The signup form posts to a dead end. Both on camera.",
+          "cue": "phone",
+          "tags": "[matter-of-fact]"
+        },
+        {
+          "say": "Where Claude judged, Elastic shows how similar checks went elsewhere.",
+          "cue": "precedent"
+        },
+        {
+          "say": "Three failed, so the money stays held.",
+          "cue": "held",
+          "tags": "[serious]"
+        }
+      ]
+    },
+    {
+      "id": "guard",
+      "role": "verifier",
+      "actor": "Verdikt's verifier · on neither side",
+      "screen": "A pre-check of the build that hides a note telling the AI reviewer to pass everything: the hidden text is quoted and flagged before any model reads the page.",
+      "lines": [
+        {
+          "say": "And a build that hides a note, telling the AI to pass it?",
+          "cue": "tamper",
+          "tags": "[intrigued]"
+        },
+        {
+          "say": "The probes catch it before any model reads the page.",
+          "cue": "caught",
+          "tags": "[confident]"
+        }
+      ]
+    },
+    {
+      "id": "pass",
+      "role": "freelancer",
+      "actor": "Sam's agent · then the verifier",
+      "screen": "Sam's side: the complete build pre-checks clean, Resubmit for checking, the checks run with the Kernel stage line, 6/6 pass, $1,800 released and $1,764 paid out to Sam.",
+      "lines": [
+        {
+          "say": "Sam's agent fixes the build, and a free pre-check finds nothing failing.",
+          "cue": "precheck"
+        },
+        {
+          "say": "Sam delivers again. Kernel records it, and all six checks pass.",
+          "cue": "submit"
+        },
+        {
+          "say": "PayPal captures the payment... and Sam is paid.",
+          "cue": "paid",
+          "tags": "[warm]"
+        }
+      ]
+    },
+    {
+      "id": "money",
+      "role": "client",
+      "actor": "Maya · the hirer",
+      "screen": "The Ledger (AG Grid) with PayPal IDs and Check against PayPal; the AG Studio dashboard with its Ask Claude panel open; the Bryntum timeline.",
+      "lines": [
+        {
+          "say": "Back with Maya. Every PayPal ID lands in an AG Grid ledger, checked against PayPal in one click.",
+          "cue": "check"
+        },
+        {
+          "say": "Her dashboard runs on AG Studio, with Claude on hand to change it,",
+          "cue": "studio"
+        },
+        {
+          "say": "and a Bryntum timeline plans what's next.",
+          "cue": "timeline"
+        }
+      ]
     },
     {
       "id": "close",
-      "slot": 20,
-      "title": "The ledger, and the close",
-      "screen": "The Ledger (AG Grid) with PayPal IDs; Ask › Biggest payouts sets the grid. End card: the mark, verdikt-leg2.onrender.com, “Try it with no account”, built with PayPal, Claude, MCP, AG Grid and Render.",
-      "say": "Every PayPal ID lands in the ledger, built on AG Grid, and you can ask it in plain words. Agents do the searching, the bargaining and the building. A person approves the money once. PayPal holds it, and the checks release it. That's Verdikt."
+      "role": "none",
+      "screen": "End card: the mark, verdikt-leg2.onrender.com, Try the demo, built with PayPal, Claude, Kernel, Elastic, Channel3, AG Grid, Bryntum and Render.",
+      "lines": [
+        {
+          "say": "Agents search, bargain and build."
+        },
+        {
+          "say": "A person approves the money once. PayPal holds it, and the checks release it."
+        },
+        {
+          "say": "That's Verdikt.",
+          "pause": 1.6,
+          "tags": "[warm]"
+        }
+      ]
     }
-  ]
+  ],
+  "sfx": {
+    "click": {
+      "prompt": "A single soft, crisp computer mouse click, close up, clean and dry, no echo",
+      "seconds": 0.5,
+      "influence": 0.7,
+      "gain": -19
+    },
+    "type": {
+      "prompt": "Light quick typing on a modern laptop keyboard, about six soft keystrokes, close up, dry",
+      "seconds": 1.4,
+      "influence": 0.6,
+      "gain": -22
+    },
+    "swoosh": {
+      "prompt": "A soft airy whoosh transition, smooth and modern, short and subtle",
+      "seconds": 1,
+      "influence": 0.6,
+      "gain": -15
+    },
+    "ok": {
+      "prompt": "Soft warm two-note success chime, modern app notification, gentle marimba, clean",
+      "seconds": 1.3,
+      "influence": 0.6,
+      "gain": -12
+    },
+    "money": {
+      "prompt": "Soft modern payment success sound: a gentle coin chime with a light sparkle, short and pleasant",
+      "seconds": 1.5,
+      "influence": 0.6,
+      "gain": -8
+    },
+    "fail": {
+      "prompt": "A soft low muted two-note error tone, calm and gentle, modern app interface",
+      "seconds": 1.1,
+      "influence": 0.6,
+      "gain": -13
+    },
+    "alert": {
+      "prompt": "A subtle soft warning ping, single clear tone, modern interface",
+      "seconds": 0.9,
+      "influence": 0.6,
+      "gain": -13
+    },
+    "stamp": {
+      "prompt": "A soft satisfying rubber stamp thump on paper, close up",
+      "seconds": 0.8,
+      "influence": 0.6,
+      "gain": -14
+    },
+    "record": {
+      "prompt": "A soft modern camera shutter click followed by a tiny recording start beep",
+      "seconds": 0.9,
+      "influence": 0.6,
+      "gain": -15
+    },
+    "riser": {
+      "prompt": "Soft cinematic riser, airy synth swell building gently, modern tech, ending cleanly",
+      "seconds": 3.5,
+      "influence": 0.5,
+      "gain": -14
+    },
+    "impact": {
+      "prompt": "Soft deep cinematic sub boom impact with a gentle glassy shimmer tail",
+      "seconds": 3,
+      "influence": 0.5,
+      "gain": -12
+    }
+  },
+  "music": {
+    "model": "music_v2_5",
+    "styles": [
+      "instrumental",
+      "modern cinematic electronic underscore",
+      "warm analog synth pads",
+      "soft felt piano",
+      "gentle pulsing bass",
+      "clean minimal percussion",
+      "optimistic tech product film"
+    ],
+    "negative": [
+      "vocals",
+      "singing",
+      "choir",
+      "spoken words",
+      "lyrics",
+      "aggressive drums",
+      "distorted guitar"
+    ],
+    "acts": [
+      {
+        "name": "Intro",
+        "beats": [
+          "hook"
+        ],
+        "text": "[Intro]\nSparse, curious, a single piano motif over a soft pulse",
+        "styles": [
+          "sparse",
+          "curious",
+          "quiet"
+        ]
+      },
+      {
+        "name": "Hiring",
+        "beats": [
+          "limit",
+          "hire",
+          "terms",
+          "fund"
+        ],
+        "text": "[Verse]\nWarm steady groove enters, light percussion, confident and friendly",
+        "styles": [
+          "warm",
+          "steady groove",
+          "light percussion",
+          "optimistic"
+        ]
+      },
+      {
+        "name": "The shop",
+        "beats": [
+          "list",
+          "claim"
+        ],
+        "text": "[Bridge]\nLighter and playful, plucked synths, bright",
+        "styles": [
+          "playful",
+          "plucked synth",
+          "bright",
+          "light"
+        ]
+      },
+      {
+        "name": "The check",
+        "beats": [
+          "fail",
+          "guard"
+        ],
+        "text": "[Tension]\nDrops to a minor key, low sparse pulse, quiet suspense, focused",
+        "styles": [
+          "minor key",
+          "suspenseful",
+          "sparse",
+          "low pulse",
+          "focused"
+        ],
+        "negative": [
+          "happy",
+          "bright"
+        ]
+      },
+      {
+        "name": "The pass",
+        "beats": [
+          "pass"
+        ],
+        "text": "[Build]\nLifts back to major, rising arpeggios building to a release",
+        "styles": [
+          "rising",
+          "uplifting",
+          "major key",
+          "building arpeggios"
+        ]
+      },
+      {
+        "name": "The money",
+        "beats": [
+          "money"
+        ],
+        "text": "[Chorus]\nFull confident groove, warm and resolved",
+        "styles": [
+          "full",
+          "confident",
+          "warm",
+          "resolved groove"
+        ]
+      },
+      {
+        "name": "Outro",
+        "beats": [
+          "close"
+        ],
+        "text": "[Outro]\nGentle resolve, piano motif returns, soft clean ending",
+        "styles": [
+          "gentle",
+          "resolving",
+          "soft ending",
+          "fade out"
+        ]
+      }
+    ]
+  }
 }

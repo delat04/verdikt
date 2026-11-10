@@ -118,7 +118,8 @@ function pillOf(p, life, state) {
   if (life.state === 'checking') return { tone: 'warn', live: true, text: 'Bought · checking' }
   if (life.state === 'needs_client') return { tone: 'warn', text: `Bought · ${props.role === 'client' ? 'you decide' : `${clientName.value} decides`}` }
   if (state === 'terms') return { tone: 'neutral', text: 'On the terms' }
-  if (state === 'agreed') return { tone: 'neutral', text: p.status === 'terms' ? 'Signed by both' : `Added by ${clientName.value}` }
+  // agreed after signing: the client's own addition, or the freelancer's proposal the client said yes to
+  if (state === 'agreed') return { tone: 'neutral', text: p.status === 'terms' ? 'Signed by both' : p.plannedBy === 'freelancer' ? 'Agreed by both' : `Added by ${clientName.value}` }
   if (props.role === 'freelancer') return { tone: 'warn', text: `Waiting for ${clientName.value}` }
   return { tone: 'neutral', text: `${freelancerName.value}${p.viaAgent ? "'s agent" : ''} proposed this` }
 }

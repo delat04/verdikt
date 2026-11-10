@@ -15,6 +15,8 @@ import VButton from '@/components/ui/VButton.vue'
 import VSegmented from '@/components/ui/VSegmented.vue'
 import QueueCapsule from '@/components/QueueCapsule.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
+import RoleBar from '@/components/RoleBar.vue'
+import { ROLE_COPY } from '@/domain/roles'
 import { vGlide } from '@/directives/glide'
 import { useAuthStore } from '@/stores/auth'
 import { useTheme } from '@/composables/useTheme'
@@ -73,7 +75,7 @@ const activePersona = computed(() => (personas ? Object.keys(personas).find((k) 
 async function switchTo(key) {
   if (key === activePersona.value) return
   await auth.signInAs(key)
-  toast(`Now viewing as ${personas[key].name} (${key})`)
+  toast(`Now viewing as ${personas[key].name}, ${ROLE_COPY[key].side}`)
   if (!auth.onboarded) router.push({ path: '/onboarding', query: { next: route.fullPath } })
 }
 const demoOpen = ref(false)
@@ -183,7 +185,7 @@ onBeforeUnmount(() => {
             <div v-glide class="vk-seg persona" role="radiogroup" aria-label="Demo: view as">
               <button
                 v-for="(p, key) in personas" :key="key" type="button" role="radio" class="vk-seg__btn"
-                :class="{ 'is-active': activePersona === key }" :aria-checked="activePersona === key" :title="`View as ${p.name}, the ${key}`" @click="switchTo(key)"
+                :class="{ 'is-active': activePersona === key }" :data-role="key" :aria-checked="activePersona === key" :title="`View as ${p.name}, ${ROLE_COPY[key].side}`" @click="switchTo(key)"
               >
                 <VAvatar :name="p.name" size="sm" />
                 <span class="persona__name">{{ p.name.split(' ')[0] }}</span>
@@ -204,6 +206,7 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
+      <RoleBar v-if="isDemo && activePersona" :role="activePersona" :personas="personas" @switch="switchTo" />
       <main class="content"><slot /></main>
     </div>
 
@@ -280,6 +283,9 @@ onBeforeUnmount(() => {
 
 .persona { padding: 4px; }
 .persona .vk-seg__btn { height: 34px; padding: 0 12px 0 4px; }
+/* each side keeps its colour from the role bar on its avatar */
+.persona [data-role='client'] :deep(.vk-avatar) { box-shadow: 0 0 0 2px var(--vk-role-client); }
+.persona [data-role='freelancer'] :deep(.vk-avatar) { box-shadow: 0 0 0 2px var(--vk-role-freelancer); }
 
 .demo { position: relative; }
 .demo__chip {

@@ -99,6 +99,9 @@
   --vk-warn: #D98A04;   --vk-warn-ink: #8A5600;   --vk-warn-soft: #FEF4E2;
   --vk-danger: #E5484D; --vk-danger-ink: #A3292D; --vk-danger-soft: #FDECEC;
   --vk-rail-ok: #3BE37A;       /* "paid" on the inverted rail (ink capsule in light) */
+  /* the two sides of a contract, in the demo's role bar and the persona switch: never a status colour */
+  --vk-role-client: #6E56CF; --vk-role-client-ink: #5B3FC4; --vk-role-client-soft: #F4F0FF; --vk-role-client-line: #DCD3FF;
+  --vk-role-freelancer: #0E8F9A; --vk-role-freelancer-ink: #0B6A73; --vk-role-freelancer-soft: #E6F6F7; --vk-role-freelancer-line: #B7E3E7;
 
   /* elevation (light: shadows; dark: hairlines) */
   --vk-elev-1: 0 1px 2px rgba(14, 15, 18, .04);
@@ -142,6 +145,8 @@
   --vk-warn: #FBBF24;   --vk-warn-ink: #FCD34D;   --vk-warn-soft: rgba(251, 191, 36, .12);
   --vk-danger: #F87171; --vk-danger-ink: #FCA5A5; --vk-danger-soft: rgba(248, 113, 113, .12);
   --vk-rail-ok: #0B8F4F;
+  --vk-role-client: #8E7BFF; --vk-role-client-ink: #C2B8FF; --vk-role-client-soft: rgba(142, 123, 255, .14); --vk-role-client-line: rgba(142, 123, 255, .38);
+  --vk-role-freelancer: #2BB7C2; --vk-role-freelancer-ink: #8ADFE5; --vk-role-freelancer-soft: rgba(43, 183, 194, .13); --vk-role-freelancer-line: rgba(43, 183, 194, .38);
 
   --vk-elev-1: none;
   --vk-elev-pop: inset 0 1px 0 rgba(255, 255, 255, .04), 0 12px 32px -6px rgba(0, 0, 0, .7);
@@ -165,6 +170,8 @@
     --vk-warn: #FBBF24; --vk-warn-ink: #FCD34D; --vk-warn-soft: rgba(251, 191, 36, .12);
     --vk-danger: #F87171; --vk-danger-ink: #FCA5A5; --vk-danger-soft: rgba(248, 113, 113, .12);
     --vk-rail-ok: #0B8F4F;
+    --vk-role-client: #8E7BFF; --vk-role-client-ink: #C2B8FF; --vk-role-client-soft: rgba(142, 123, 255, .14); --vk-role-client-line: rgba(142, 123, 255, .38);
+    --vk-role-freelancer: #2BB7C2; --vk-role-freelancer-ink: #8ADFE5; --vk-role-freelancer-soft: rgba(43, 183, 194, .13); --vk-role-freelancer-line: rgba(43, 183, 194, .38);
     --vk-elev-1: none;
     --vk-elev-pop: inset 0 1px 0 rgba(255, 255, 255, .04), 0 12px 32px -6px rgba(0, 0, 0, .7);
     --vk-elev-modal: inset 0 1px 0 rgba(255, 255, 255, .05), 0 24px 64px -12px rgba(0, 0, 0, .8);

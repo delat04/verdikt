@@ -1255,8 +1255,10 @@ export const demo = {
     return { ok: true, locked: c.status !== 'scoping' }
   },
   async setMandate(contractId, { limitCents, deadlineDays, mustHaves = [], notes = '', autoAccept = true }) {
-    await latency()
+    // whose mandate it is is settled when the call is made: switching persona during the simulated latency must
+    // not hand one side's limits to the other
     const { c, role } = roomOf(contractId)
+    await latency()
     if (!limitCents && !deadlineDays && !mustHaves.length) throw new Error('Give your agent at least one limit or must-have')
     c.room.mandates ||= {}
     const was = c.room.mandates[role]?.active

@@ -6,6 +6,7 @@ import AuthLayout from '@/layouts/AuthLayout.vue'
 import VButton from '@/components/ui/VButton.vue'
 import VField from '@/components/ui/VField.vue'
 import { api, isDemo, canLeaveDemo, enterDemo, leaveDemo } from '@/services'
+import { ROLE_COPY } from '@/domain/roles'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
@@ -49,10 +50,10 @@ async function demoAs(key) {
       <p class="sub">Two demo accounts share one browser, so you can play both parties of a contract. Switch any time from the top bar.</p>
       <div class="vk-choices people">
         <button v-for="(p, key) in personas" :key="key" type="button" class="vk-choice" :disabled="!!busy" @click="demoAs(key)">
-          <span class="vk-choice__icon"><Briefcase v-if="key === 'client'" :size="18" /><Code2 v-else :size="18" /></span>
+          <span class="vk-choice__icon" :data-role="key"><Briefcase v-if="key === 'client'" :size="18" /><Code2 v-else :size="18" /></span>
           <span>
             <p class="vk-choice__title">{{ p.name }}</p>
-            <p class="vk-choice__sub">{{ key === 'client' ? 'Client' : 'Freelancer' }} · {{ p.org }}</p>
+            <p class="vk-choice__sub">{{ key === 'client' ? 'The hirer' : 'The freelancer' }} · {{ p.org }} · {{ ROLE_COPY[key].does }}</p>
           </span>
           <span v-if="busy === key" class="vk-spin" style="margin-left: auto" />
           <ArrowRight v-else :size="16" class="go" />
@@ -105,4 +106,7 @@ async function demoAs(key) {
 .sent { display: flex; flex-direction: column; align-items: flex-start; }
 .sent .vk-btn { margin-top: 20px; }
 .sent__icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--vk-accent-soft); color: var(--vk-accent-text); border: 1px solid var(--vk-accent-line); }
+/* each side's colour, as in the role bar */
+.vk-choice__icon[data-role='client'] { color: var(--vk-role-client-ink); border-color: var(--vk-role-client-line); background: var(--vk-role-client-soft); }
+.vk-choice__icon[data-role='freelancer'] { color: var(--vk-role-freelancer-ink); border-color: var(--vk-role-freelancer-line); background: var(--vk-role-freelancer-soft); }
 </style>

@@ -4,8 +4,46 @@
     {
       "name": "web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "web", "run", "dev"],
+      "runtimeArgs": [
+        "--prefix",
+        "web",
+        "run",
+        "dev"
+      ],
       "port": 5180
+    },
+    {
+      "name": "demo",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "web",
+        "exec",
+        "--",
+        "vite",
+        "web",
+        "--mode",
+        "demo",
+        "--port",
+        "5181",
+        "--strictPort"
+      ],
+      "port": 5181
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "server",
+        "run",
+        "dev"
+      ],
+      "env": {
+        "CORS_ORIGIN": "http://localhost:5180,http://127.0.0.1:5180,http://localhost:5181,http://127.0.0.1:5181",
+        "STUDIO_DEMO_TURNS_PER_DAY": "6"
+      },
+      "port": 4100
     }
   ]
 }
